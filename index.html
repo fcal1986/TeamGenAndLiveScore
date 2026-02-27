@@ -1437,16 +1437,30 @@ function showApp(user) {
 
 async function sendMagicLink() {
   if (!_sb) { showAuthError('Supabase nicht konfiguriert.'); return; }
+
   const email = document.getElementById('auth-email').value.trim();
   if (!email || !email.includes('@')) { showAuthError('Bitte eine gültige E-Mail eingeben.'); return; }
+
   const btn = document.getElementById('auth-btn');
   btn.disabled = true; btn.textContent = '⏳ Sende…';
+
+  // In der APK (Median) wollen wir nach dem Klick zurück in die App:
+  // spielr://auth/callback
+  // Im Web (GitHub Pages) bleiben wir auf der aktuellen Seite.
+  const ua = navigator.userAgent || '';
+  const forceNative = new URLSearchParams(window.location.search).get('native') === '1';
+  const inMedian = /Median/i.test(ua);
+  const emailRedirectTo = (forceNative || inMedian)
+    ? 'spielr://auth/callback'
+    : (window.location.origin + window.location.pathname);
+
   try {
     const { error } = await _sb.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.href }
+      options: { emailRedirectTo }
     });
     if (error) throw error;
+
     document.getElementById('auth-form').style.display = 'none';
     document.getElementById('auth-sent').style.display = 'block';
     document.getElementById('auth-error').style.display = 'none';
@@ -1501,9 +1515,49 @@ async function signOut() {
 // ╔══════════════════════════════════════════════════════╗
 // ║  INIT                                                 ║
 // ╚══════════════════════════════════════════════════════╝
+
+// Handle Magic-Link / OAuth redirects (Web + Median Deep Links)
+// - Supports implicit (#access_token=...) and PKCE (?code=...)
+// - Stores session and cleans URL afterwards
+async function handleAuthRedirect() {
+  if (!_sb) return null;
+
+  const href = window.location.href;
+  const hasAccessToken = window.location.hash.includes('access_token');
+  const urlObj = new URL(href);
+  const code = urlObj.searchParams.get('code');
+
+  try {
+    if (hasAccessToken && typeof _sb.auth.getSessionFromUrl === 'function') {
+      const { data, error } = await _sb.auth.getSessionFromUrl({ storeSession: true });
+      if (error) throw error;
+      return data?.session || null;
+    }
+
+    if (code) {
+      const { data, error } = await _sb.auth.exchangeCodeForSession(code);
+      if (error) throw error;
+      return data?.session || null;
+    }
+  } catch (e) {
+    console.warn('Spielr: auth redirect handling failed', e);
+    return null;
+  } finally {
+    // Clean sensitive tokens/codes from URL (important on mobile)
+    if (hasAccessToken || code) {
+      history.replaceState({}, document.title, window.location.pathname);
+    }
+  }
+
+  return null;
+}
+
 async function initApp() {
   if (_sb) {
-    // Check existing session (handles Magic Link redirect)
+    // Handle redirect callbacks (Magic Link / OAuth) first
+    await handleAuthRedirect();
+
+    // Check existing session
     const { data: { session } } = await _sb.auth.getSession();
     if (session?.user) {
       const loaded = await loadFromSupabase(session.user.id);
