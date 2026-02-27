@@ -1583,14 +1583,26 @@
       dbg('PKCE code in URL erkannt: ' + search.substring(0, 60), 'ok');
     }
 
-    // window.gonative Objekt
-    if (window.gonative) {
-      dbg('window.gonative: verfügbar', 'ok');
-      dbg('gonative keys: ' + Object.keys(window.gonative).join(', '), 'info');
-    } else {
-      dbg('window.gonative: NICHT verfügbar' + (isMedian ? ' (median UA aber kein JS-Bridge?)' : ''), isMedian ? 'warn' : 'info');
+    // window.gonative — mit Retry (Median injiziert async)
+    function checkBridge(attempt) {
+      const gn = window.gonative || window.median;
+      if (gn) {
+        dbg('gonative/median Bridge verfügbar (Versuch ' + attempt + ')', 'ok');
+        dbg('Bridge keys: ' + Object.keys(gn).join(', '), 'info');
+        // Nested objects
+        ['inAppBrowser','open','browser','webview'].forEach(k => {
+          if (gn[k]) dbg('  → ' + k + ': ' + Object.keys(gn[k]).join(', '), 'info');
+        });
+      } else if (attempt < 5) {
+        dbg('Bridge noch nicht da (Versuch ' + attempt + '), retry in 500ms…', 'warn');
+        setTimeout(() => checkBridge(attempt + 1), 500);
+      } else {
+        dbg('Bridge nach 5 Versuchen nicht gefunden!', 'err');
+        dbg('Verfügbare window keys mit "native"/"median"/"go": ' +
+          Object.keys(window).filter(k => /native|median|gonative/i.test(k)).join(', ') || 'keine', 'warn');
+      }
     }
-
+    checkBridge(1);
     _debugInited = true;
   });
 
@@ -1782,27 +1794,28 @@ function showApp(user) {
   }
 }
 
-// ── Google OAuth — Median + Browser kompatibel ──
+// ── Google OAuth — Median Protocol + Browser kompatibel ──
 async function signInWithGoogle() {
   dbg('--- Google Login gestartet ---', 'info');
   if (!_sb) {
-    dbg('FEHLER: Supabase nicht konfiguriert (_sb ist null)', 'err');
+    dbg('FEHLER: Supabase nicht konfiguriert', 'err');
     showAuthError('Supabase nicht konfiguriert.'); return;
   }
   const btn = document.getElementById('auth-google-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Weiterleitung…'; }
 
   const ua = navigator.userAgent;
-  const isMedianUA = ua.indexOf('median') > -1 || ua.indexOf('gonative') > -1;
-  const hasGonativeJS = !!window.gonative;
-  const hasInAppBrowser = !!(window.gonative && window.gonative.inAppBrowser);
-  dbg('isMedian (UA): ' + isMedianUA, 'info');
-  dbg('gonative JS-Bridge: ' + hasGonativeJS, hasGonativeJS ? 'ok' : 'warn');
-  dbg('inAppBrowser API: ' + hasInAppBrowser, hasInAppBrowser ? 'ok' : 'warn');
-  dbg('redirectTo: ' + APP_URL, 'info');
+  const isMedian = ua.indexOf('median') > -1 || ua.indexOf('gonative') > -1;
+
+  // gonative kann async injiziert werden — nochmal prüfen
+  const gn = window.gonative || window.median;
+  dbg('isMedian (UA): ' + isMedian, 'info');
+  dbg('window.gonative: ' + !!window.gonative, window.gonative ? 'ok' : 'warn');
+  dbg('window.median: ' + !!window.median, 'info');
+  if (gn) dbg('Bridge keys: ' + Object.keys(gn).slice(0,8).join(', '), 'info');
 
   try {
-    dbg('Rufe _sb.auth.signInWithOAuth auf…', 'info');
+    dbg('signInWithOAuth wird aufgerufen…', 'info');
     const { data, error } = await _sb.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -1811,28 +1824,56 @@ async function signInWithGoogle() {
         queryParams: { access_type: 'offline', prompt: 'select_account' }
       }
     });
-    if (error) {
-      dbg('signInWithOAuth Fehler: ' + error.message, 'err');
-      throw error;
-    }
+    if (error) { dbg('OAuth Fehler: ' + error.message, 'err'); throw error; }
 
     const oauthUrl = data?.url;
-    dbg('OAuth URL erhalten: ' + (oauthUrl ? oauthUrl.substring(0,80)+'…' : 'NULL!'), oauthUrl ? 'ok' : 'err');
-    if (!oauthUrl) throw new Error('Keine OAuth URL von Supabase erhalten');
+    dbg('OAuth URL: ' + (oauthUrl ? oauthUrl.substring(0,80)+'…' : 'NULL'), oauthUrl ? 'ok' : 'err');
+    if (!oauthUrl) throw new Error('Keine OAuth URL erhalten');
 
-    if (isMedianUA && hasGonativeJS && hasInAppBrowser) {
-      dbg('→ Öffne via gonative.inAppBrowser.open()', 'ok');
-      window.gonative.inAppBrowser.open({ url: oauthUrl });
-    } else if (isMedianUA && hasGonativeJS) {
-      dbg('→ gonative vorhanden aber kein inAppBrowser — versuche window.location', 'warn');
-      window.location.href = oauthUrl;
+    if (isMedian) {
+      // ── Median: InAppBrowser via JS Protocol öffnen ──
+      // Median schließt den InAppBrowser automatisch wenn die URL
+      // auf unsere App-Domain matcht (via regexInternalExternal → internal)
+      // Das löst dann onAuthStateChange in der WebView aus.
+
+      // Methode 1: Median JS Bridge Protocol (sicherste Methode)
+      const medianUrl = 'median://inAppBrowser/open?url=' + encodeURIComponent(oauthUrl);
+      dbg('→ Versuche median:// Protocol: ' + medianUrl.substring(0,60)+'…', 'info');
+
+      // Teste ob median:// Protocol funktioniert via iframe trick
+      let protocolWorked = false;
+      try {
+        // Median Protocol via iframe (verhindert Page-Navigation falls es nicht klappt)
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        document.body.appendChild(iframe);
+        iframe.src = medianUrl;
+        setTimeout(() => document.body.removeChild(iframe), 500);
+        protocolWorked = true;
+        dbg('→ median:// iframe gesendet', 'ok');
+      } catch(ifrErr) {
+        dbg('→ iframe Fehler: ' + ifrErr.message, 'warn');
+      }
+
+      // Fallback nach 1s: direkt via window.location wenn Protocol nicht reagiert
+      setTimeout(() => {
+        // Prüfen ob wir noch auf der Login-Seite sind (kein Redirect passiert)
+        const authScreen = document.getElementById('screen-auth');
+        const stillOnAuth = authScreen && authScreen.style.display !== 'none';
+        if (stillOnAuth) {
+          dbg('→ Protocol-Fallback: window.location.href = oauthUrl', 'warn');
+          window.location.href = oauthUrl;
+        }
+      }, 1000);
+
     } else {
-      dbg('→ Browser-Modus: window.location.href Redirect', 'info');
+      // Browser: normaler Redirect
+      dbg('→ Browser-Modus: window.location.href', 'info');
       window.location.href = oauthUrl;
     }
 
   } catch(e) {
-    dbg('EXCEPTION in signInWithGoogle: ' + e.message, 'err');
+    dbg('EXCEPTION: ' + e.message, 'err');
     showAuthError('Google Login fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
     if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
   }
