@@ -675,7 +675,118 @@
   #session-recall-banner { animation: fadeIn .3s ease; }
   #quick-repeat-banner   { animation: fadeIn .25s ease; }
 
-  /* Auth screen uses inline styles – no extra CSS needed */
+  /* ══ AUTH SCREEN ══ */
+  #screen-auth {
+    position: fixed; inset: 0; z-index: 1000;
+    background: var(--bg);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 32px 20px;
+  }
+  .auth-card {
+    width: 100%; max-width: 380px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 36px 28px 32px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+  }
+  .auth-logo-wrap {
+    text-align: center; margin-bottom: 28px;
+  }
+  .auth-logo-icon { font-size: 52px; display: block; margin-bottom: 10px; }
+  .auth-logo-title {
+    font-size: 26px; font-weight: 800; color: var(--text);
+    margin-bottom: 4px; letter-spacing: -.02em;
+  }
+  .auth-logo-sub { font-size: 14px; color: var(--text2); line-height: 1.5; }
+
+  /* Google Button */
+  .auth-google-btn {
+    width: 100%; padding: 14px 20px;
+    background: #fff; color: #1f1f1f;
+    border: none; border-radius: 12px;
+    font-family: Outfit, sans-serif; font-size: 15px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;
+    transition: all .18s; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    margin-bottom: 20px;
+  }
+  .auth-google-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
+  .auth-google-btn:active { transform: scale(0.98); }
+  .auth-google-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .auth-google-icon { width: 20px; height: 20px; flex-shrink: 0; }
+
+  /* Divider */
+  .auth-divider {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 20px; color: var(--text3); font-size: 12px; font-weight: 600;
+  }
+  .auth-divider::before, .auth-divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
+  /* Magic Link */
+  .auth-email-input {
+    width: 100%; padding: 13px 16px;
+    background: var(--surface2); border: 1.5px solid var(--border);
+    border-radius: 10px; color: var(--text);
+    font-family: Outfit, sans-serif; font-size: 15px;
+    outline: none; transition: border-color .2s; margin-bottom: 10px;
+    display: block;
+  }
+  .auth-email-input:focus { border-color: var(--accent); }
+  .auth-email-input::placeholder { color: var(--text3); }
+
+  .auth-magic-btn {
+    width: 100%; padding: 13px 20px;
+    background: var(--surface2); color: var(--text);
+    border: 1.5px solid var(--border); border-radius: 10px;
+    font-family: Outfit, sans-serif; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all .18s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .auth-magic-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .auth-magic-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* States */
+  .auth-sent-box {
+    text-align: center; display: none;
+    animation: authFadeIn .3s ease;
+  }
+  .auth-sent-icon { font-size: 48px; margin-bottom: 14px; }
+  .auth-sent-title { font-size: 19px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .auth-sent-sub { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 20px; }
+
+  .auth-error-box {
+    display: none; margin-top: 10px;
+    background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
+    border-radius: 10px; padding: 11px 14px;
+    font-size: 13px; color: #f87171; line-height: 1.5;
+  }
+
+  .auth-hint {
+    text-align: center; font-size: 12px; color: var(--text3);
+    margin-top: 16px; line-height: 1.6;
+  }
+
+  /* Loading overlay */
+  #auth-loading {
+    display: none; position: fixed; inset: 0; z-index: 1100;
+    background: var(--bg); align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px;
+  }
+  #auth-loading.show { display: flex; }
+  .auth-spinner {
+    width: 36px; height: 36px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes authFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .auth-loading-text { font-size: 14px; color: var(--text2); font-weight: 600; }
 
   /* ── Sync indicator ── */
   #sync-indicator {
@@ -727,40 +838,67 @@
 </head>
 <body>
 
+<!-- ===================== AUTH LOADING ===================== -->
+<div id="auth-loading">
+  <div class="auth-spinner"></div>
+  <div class="auth-loading-text" id="auth-loading-text">Anmeldung prüfen…</div>
+</div>
+
 <!-- ===================== LOGIN SCREEN ===================== -->
-<div id="screen-auth" style="display:none;position:fixed;inset:0;z-index:1000;background:var(--bg);flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;">
-  <div style="max-width:360px;width:100%">
-    <div style="text-align:center;margin-bottom:40px">
-      <div style="font-size:64px;margin-bottom:12px">🎲</div>
-      <h1 style="font-size:30px;font-weight:800;color:var(--text);margin-bottom:6px">Spielr</h1>
-      <p style="font-size:15px;color:var(--text2);line-height:1.5">Teams, Turniere &amp; Abstimmungen<br>für deine Gruppe</p>
+<div id="screen-auth">
+  <div class="auth-card">
+
+    <!-- Logo -->
+    <div class="auth-logo-wrap">
+      <span class="auth-logo-icon">🎲</span>
+      <div class="auth-logo-title">Spielr</div>
+      <div class="auth-logo-sub">Teams, Turniere &amp; Abstimmungen<br>für deine Gruppe</div>
     </div>
 
-    <!-- Magic Link Form -->
+    <!-- ① Main form (Google + Magic Link) -->
     <div id="auth-form">
-      <input id="auth-email" type="email" placeholder="deine@email.de"
-        onkeydown="if(event.key==='Enter')sendMagicLink()"
-        style="width:100%;padding:15px 16px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:Outfit,sans-serif;font-size:16px;outline:none;margin-bottom:12px;transition:border .2s;text-align:center">
-      <button class="btn btn-primary btn-full" onclick="sendMagicLink()" id="auth-btn" style="font-size:16px;padding:15px">
+
+      <!-- Google OAuth — Primary -->
+      <button class="auth-google-btn" id="auth-google-btn" onclick="signInWithGoogle()">
+        <svg class="auth-google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Mit Google anmelden
+      </button>
+
+      <!-- Divider -->
+      <div class="auth-divider">oder per E-Mail</div>
+
+      <!-- Magic Link -->
+      <input class="auth-email-input" id="auth-email" type="email"
+        placeholder="deine@email.de" autocomplete="email"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();sendMagicLink()}">
+      <button class="auth-magic-btn" id="auth-magic-btn" onclick="sendMagicLink()">
         ✉️ Magic Link senden
       </button>
-      <p style="text-align:center;font-size:13px;color:var(--text3);margin-top:14px;line-height:1.5">
-        Kein Passwort nötig.<br>Du bekommst einen Anmelde-Link per E-Mail.
-      </p>
+
+      <!-- Error -->
+      <div class="auth-error-box" id="auth-error"></div>
     </div>
 
-    <!-- Sent state -->
-    <div id="auth-sent" style="display:none;text-align:center">
-      <div style="font-size:52px;margin-bottom:16px">📬</div>
-      <h2 style="font-size:22px;font-weight:700;margin-bottom:8px;color:var(--text)">Link verschickt!</h2>
-      <p style="font-size:14px;color:var(--text2);margin-bottom:28px;line-height:1.6">
-        Schau in dein E-Mail-Postfach<br>und klicke auf den Link zum Anmelden.
-      </p>
-      <button class="btn btn-secondary btn-full" onclick="resetAuthForm()">Andere E-Mail versuchen</button>
+    <!-- ② Sent confirmation -->
+    <div class="auth-sent-box" id="auth-sent">
+      <div class="auth-sent-icon">📬</div>
+      <div class="auth-sent-title">Link verschickt!</div>
+      <div class="auth-sent-sub">
+        Schau in dein Postfach und klicke<br>auf den Anmelde-Link.
+        <br><br>
+        <span id="auth-cooldown-msg" style="color:var(--accent3);font-weight:600"></span>
+      </div>
+      <button class="auth-magic-btn" onclick="resetAuthForm()" style="margin-top:4px">
+        Andere E-Mail versuchen
+      </button>
     </div>
 
-    <!-- Error -->
-    <div id="auth-error" style="display:none;margin-top:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:12px;font-size:13px;color:#ef4444;text-align:center"></div>
+    <div class="auth-hint">Kein Passwort nötig · Deine Daten sind sicher</div>
   </div>
 </div>
 
@@ -1413,8 +1551,27 @@ function setSyncStatus(status) {
 }
 
 // ╔══════════════════════════════════════════════════════╗
-// ║  AUTH                                                 ║
+// ║  AUTH  –  production-ready, Google OAuth + Magic Link ║
 // ╚══════════════════════════════════════════════════════╝
+
+// ── Redirect URL: immer aktueller Origin+Pfad, nie localhost-hardcoded ──
+function getRedirectURL() {
+  return window.location.origin + window.location.pathname;
+}
+
+// ── Loading overlay ──
+function showAuthLoading(msg) {
+  const el = document.getElementById('auth-loading');
+  const txt = document.getElementById('auth-loading-text');
+  if (el) el.classList.add('show');
+  if (txt && msg) txt.textContent = msg;
+}
+function hideAuthLoading() {
+  const el = document.getElementById('auth-loading');
+  if (el) el.classList.remove('show');
+}
+
+// ── Show / Hide screens ──
 function showAuthScreen() {
   document.getElementById('screen-auth').style.display = 'flex';
   const btn = document.getElementById('user-avatar-btn');
@@ -1424,49 +1581,131 @@ function showAuthScreen() {
 function showApp(user) {
   _currentUserId = user.id;
   document.getElementById('screen-auth').style.display = 'none';
+  hideAuthLoading();
   const btn = document.getElementById('user-avatar-btn');
   if (btn) {
     btn.style.display = 'flex';
-    const e = user.email || '?';
+    const e = user.email || user.user_metadata?.name || '?';
     btn.textContent = e[0].toUpperCase();
-    btn.title = e;
+    btn.title = user.email || '';
   }
   const menuEmail = document.getElementById('user-menu-email');
-  if (menuEmail) menuEmail.textContent = user.email || '';
+  if (menuEmail) {
+    const name = user.user_metadata?.full_name || user.user_metadata?.name || '';
+    menuEmail.innerHTML = name
+      ? '<strong style="color:var(--text);font-size:13px">' + name + '</strong><br>' + (user.email || '')
+      : (user.email || '');
+  }
 }
+
+// ── Google OAuth ──
+async function signInWithGoogle() {
+  if (!_sb) { showAuthError('Supabase nicht konfiguriert.'); return; }
+  const btn = document.getElementById('auth-google-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Weiterleitung…'; }
+  try {
+    const { error } = await _sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: getRedirectURL(),
+        queryParams: { access_type: 'offline', prompt: 'select_account' }
+      }
+    });
+    if (error) throw error;
+    // Browser leitet weiter — Button bleibt disabled
+  } catch(e) {
+    showAuthError('Google Login fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
+    if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+  }
+}
+function googleBtnInner() {
+  return '<svg class="auth-google-icon" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>Mit Google anmelden';
+}
+
+// ── Magic Link + Cooldown ──
+let _magicCooldownTimer = null;
+let _magicCooldownEnd   = 0;
+let _magicSending       = false;
 
 async function sendMagicLink() {
   if (!_sb) { showAuthError('Supabase nicht konfiguriert.'); return; }
+  if (_magicSending) return; // Doppelklick-Schutz
+  const now = Date.now();
+  if (now < _magicCooldownEnd) {
+    const secs = Math.ceil((_magicCooldownEnd - now) / 1000);
+    showAuthError('Bitte warte noch ' + secs + ' Sekunden vor dem nächsten Versuch.');
+    return;
+  }
 
-  const email = document.getElementById('auth-email').value.trim();
-  if (!email || !email.includes('@')) { showAuthError('Bitte eine gültige E-Mail eingeben.'); return; }
+  const emailEl = document.getElementById('auth-email');
+  const email = emailEl ? emailEl.value.trim() : '';
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showAuthError('Bitte eine gültige E-Mail-Adresse eingeben.');
+    emailEl && emailEl.focus();
+    return;
+  }
 
-  const btn = document.getElementById('auth-btn');
-  btn.disabled = true; btn.textContent = '⏳ Sende…';
-
-  // In der APK (Median) wollen wir nach dem Klick zurück in die App:
-  // spielr://auth/callback
-  // Im Web (GitHub Pages) bleiben wir auf der aktuellen Seite.
-  const ua = navigator.userAgent || '';
-  const forceNative = new URLSearchParams(window.location.search).get('native') === '1';
-  const inMedian = /Median/i.test(ua);
-  const emailRedirectTo = (forceNative || inMedian)
-    ? 'spielr://auth/callback'
-    : (window.location.origin + window.location.pathname);
+  const btn = document.getElementById('auth-magic-btn');
+  _magicSending = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sende…'; }
+  hideAuthError();
 
   try {
     const { error } = await _sb.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo }
+      options: { emailRedirectTo: getRedirectURL(), shouldCreateUser: true }
     });
-    if (error) throw error;
 
+    if (error) {
+      // Rate-Limit abfangen
+      const msg = error.message || '';
+      if (msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('limit') || error.status === 429) {
+        startMagicCooldown(60);
+        showAuthError('Zu viele Versuche. Bitte 60 Sekunden warten.');
+      } else {
+        showAuthError('Fehler beim Senden: ' + msg);
+        if (btn) { btn.disabled = false; btn.textContent = '✉️ Magic Link senden'; }
+      }
+      _magicSending = false;
+      return;
+    }
+
+    // Erfolg → 60s Cooldown starten, Sent-View zeigen
+    startMagicCooldown(60);
     document.getElementById('auth-form').style.display = 'none';
     document.getElementById('auth-sent').style.display = 'block';
-    document.getElementById('auth-error').style.display = 'none';
+
   } catch(e) {
-    showAuthError('Fehler: ' + (e.message || 'Unbekannter Fehler'));
-    btn.disabled = false; btn.textContent = '🔗 Magic Link senden';
+    showAuthError('Netzwerkfehler. Bitte Verbindung prüfen.');
+    if (btn) { btn.disabled = false; btn.textContent = '✉️ Magic Link senden'; }
+  }
+  _magicSending = false;
+}
+
+function startMagicCooldown(seconds) {
+  _magicCooldownEnd = Date.now() + seconds * 1000;
+  if (_magicCooldownTimer) clearInterval(_magicCooldownTimer);
+  _updateCooldownDisplay();
+  _magicCooldownTimer = setInterval(() => {
+    const remaining = Math.ceil((_magicCooldownEnd - Date.now()) / 1000);
+    if (remaining <= 0) {
+      clearInterval(_magicCooldownTimer);
+      _magicCooldownTimer = null;
+      const btn = document.getElementById('auth-magic-btn');
+      if (btn) { btn.disabled = false; btn.textContent = '✉️ Magic Link senden'; }
+      const msg = document.getElementById('auth-cooldown-msg');
+      if (msg) msg.textContent = 'Du kannst jetzt eine neue E-Mail anfordern.';
+    } else {
+      _updateCooldownDisplay(remaining);
+    }
+  }, 1000);
+}
+function _updateCooldownDisplay(remaining) {
+  const msg = document.getElementById('auth-cooldown-msg');
+  if (msg) {
+    msg.textContent = remaining
+      ? 'Neuer Link in ' + remaining + 's möglich.'
+      : '';
   }
 }
 
@@ -1474,124 +1713,66 @@ function showAuthError(msg) {
   const el = document.getElementById('auth-error');
   if (el) { el.textContent = msg; el.style.display = 'block'; }
 }
+function hideAuthError() {
+  const el = document.getElementById('auth-error');
+  if (el) el.style.display = 'none';
+}
 
 function resetAuthForm() {
   document.getElementById('auth-form').style.display = 'block';
   document.getElementById('auth-sent').style.display = 'none';
-  document.getElementById('auth-error').style.display = 'none';
-  const btn = document.getElementById('auth-btn');
-  if (btn) { btn.disabled = false; btn.textContent = '🔗 Magic Link senden'; }
+  hideAuthError();
+  const btn = document.getElementById('auth-magic-btn');
+  const remaining = Math.ceil((_magicCooldownEnd - Date.now()) / 1000);
+  if (btn) {
+    if (remaining > 0) {
+      btn.disabled = true;
+      btn.textContent = 'Warte ' + remaining + 's…';
+    } else {
+      btn.disabled = false;
+      btn.textContent = '✉️ Magic Link senden';
+    }
+  }
   const inp = document.getElementById('auth-email');
-  if (inp) inp.value = '';
+  if (inp) { inp.value = ''; inp.focus(); }
 }
 
+// ── User Menu ──
 function toggleUserMenu() {
-  const menu = document.getElementById('user-menu');
-  if (menu) menu.classList.toggle('open');
+  document.getElementById('user-menu')?.classList.toggle('open');
 }
 function closeUserMenu() {
-  const menu = document.getElementById('user-menu');
-  if (menu) menu.classList.remove('open');
+  document.getElementById('user-menu')?.classList.remove('open');
 }
 document.addEventListener('click', e => {
   const menu = document.getElementById('user-menu');
-  const btn = document.getElementById('user-avatar-btn');
+  const btn  = document.getElementById('user-avatar-btn');
   if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
     menu.classList.remove('open');
   }
 });
 
+// ── Sign Out ──
 async function signOut() {
+  closeUserMenu();
   setSyncStatus('saving');
   await saveToSupabase();
   if (_sb) await _sb.auth.signOut();
   _currentUserId = null;
   state = { lists:[], currentListId:null, currentHistoryId:null, pendingResult:null, currentTab:'actions', activeTournamentId:null };
+  saveLocal();
+  resetAuthForm();
   showAuthScreen();
   renderLists();
-  setSyncStatus('saved');
 }
 
 // ╔══════════════════════════════════════════════════════╗
-// ║  INIT                                                 ║
+// ║  INIT  –  stable session bootstrap                    ║
 // ╚══════════════════════════════════════════════════════╝
-
-// Handle Magic-Link / OAuth redirects (Web + Median Deep Links)
-// - Supports implicit (#access_token=...) and PKCE (?code=...)
-// - Stores session and cleans URL afterwards
-async function handleAuthRedirect() {
-  if (!_sb) return null;
-
-  const href = window.location.href;
-  const hasAccessToken = window.location.hash.includes('access_token');
-  const urlObj = new URL(href);
-  const code = urlObj.searchParams.get('code');
-
-  try {
-    if (hasAccessToken && typeof _sb.auth.getSessionFromUrl === 'function') {
-      const { data, error } = await _sb.auth.getSessionFromUrl({ storeSession: true });
-      if (error) throw error;
-      return data?.session || null;
-    }
-
-    if (code) {
-      const { data, error } = await _sb.auth.exchangeCodeForSession(code);
-      if (error) throw error;
-      return data?.session || null;
-    }
-  } catch (e) {
-    console.warn('Spielr: auth redirect handling failed', e);
-    return null;
-  } finally {
-    // Clean sensitive tokens/codes from URL (important on mobile)
-    if (hasAccessToken || code) {
-      history.replaceState({}, document.title, window.location.pathname);
-    }
-  }
-
-  return null;
-}
+let _authInitDone = false;
 
 async function initApp() {
-  if (_sb) {
-    // Handle redirect callbacks (Magic Link / OAuth) first
-    await handleAuthRedirect();
-
-    // Check existing session
-    const { data: { session } } = await _sb.auth.getSession();
-    if (session?.user) {
-      const loaded = await loadFromSupabase(session.user.id);
-      if (!loaded) loadLocal();
-      showApp(session.user);
-      renderLists();
-    } else {
-      showAuthScreen();
-    }
-
-    // React to auth state changes (magic link clicks)
-    _sb.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        const loaded = await loadFromSupabase(session.user.id);
-        if (!loaded) loadLocal();
-        showApp(session.user);
-        renderLists();
-        showScreen('screen-lists');
-      } else if (event === 'SIGNED_OUT') {
-        showAuthScreen();
-      }
-    });
-  } else {
-    // Offline / unconfigured mode – run with localStorage only
-    loadLocal();
-    document.getElementById('screen-auth').style.display = 'none';
-    renderLists();
-  }
-
-  // Offline/online detection
-  window.addEventListener('online',  () => { setSyncStatus('saving'); saveToSupabase(); });
-  window.addEventListener('offline', () => setSyncStatus('offline'));
-
-  // Attach modal swipe handlers
+  // ── 1. Modal swipe handlers ──
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     const handle = overlay.querySelector('.modal-handle');
     if (!handle) return;
@@ -1606,6 +1787,49 @@ async function initApp() {
       }, { passive: true });
       modal.addEventListener('touchmove', e => modalTouchMove(e, id), { passive: true });
       modal.addEventListener('touchend',  e => modalTouchEnd(e, id));
+    }
+  });
+
+  // ── 2. Offline/online ──
+  window.addEventListener('online',  () => { if (_currentUserId) { setSyncStatus('saving'); saveToSupabase(); } });
+  window.addEventListener('offline', () => setSyncStatus('offline'));
+
+  // ── 3. No Supabase → pure localStorage mode ──
+  if (!_sb) {
+    loadLocal();
+    document.getElementById('screen-auth').style.display = 'none';
+    renderLists();
+    return;
+  }
+
+  // ── 4. Show loading while we check session ──
+  showAuthLoading('Anmeldung prüfen…');
+
+  // ── 5. onAuthStateChange — single source of truth ──
+  // Fires immediately with current session on page load (incl. OAuth redirect)
+  _sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+      if (session?.user && !_authInitDone) {
+        _authInitDone = true;
+        showAuthLoading('Daten laden…');
+        const loaded = await loadFromSupabase(session.user.id);
+        if (!loaded) loadLocal();
+        showApp(session.user);
+        renderLists();
+        showScreen('screen-lists');
+      } else if (session?.user && _authInitDone) {
+        // TOKEN_REFRESHED after initial — just update userId silently
+        _currentUserId = session.user.id;
+      }
+    } else if (event === 'SIGNED_OUT') {
+      _authInitDone = false;
+      hideAuthLoading();
+      showAuthScreen();
+    } else if (!session && !_authInitDone) {
+      // No session at startup
+      _authInitDone = true;
+      hideAuthLoading();
+      showAuthScreen();
     }
   });
 }

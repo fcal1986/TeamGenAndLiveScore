@@ -1,21 +1,30 @@
 # Spielr 🎲
 
-Teams auslosen, Turniere starten, fair entscheiden.
+Teams auslosen, Turniere starten, fair entscheiden.  
+Login via **Google OAuth** oder **Magic Link**.
 
-## GitHub Secrets einrichten
+## Setup (einmalig)
 
-Damit der Deploy-Workflow die Supabase-Keys einsetzen kann:
+### 1. Supabase SQL ausführen
+→ Supabase Dashboard → SQL Editor → `supabase_setup.sql` einfügen → Run
 
-1. GitHub Repository → **Settings** → **Secrets and variables** → **Actions**
-2. **New repository secret** → Name: `SUPABASE_URL` → Value: deine Supabase Project URL
-3. **New repository secret** → Name: `SUPABASE_ANON_KEY` → Value: dein Publishable API Key
+### 2. Google OAuth in Supabase aktivieren
+→ Authentication → Providers → Google → Enable  
+→ Client ID + Secret aus Google Cloud Console eintragen  
+→ Redirect URL kopieren (wird von Supabase angezeigt) → in Google Cloud eintragen
 
-## Supabase einrichten
+### 3. Supabase Site URL setzen
+→ Authentication → URL Configuration  
+→ Site URL: `https://[dein-username].github.io/spielr/`  
+→ Redirect URLs hinzufügen: `https://[dein-username].github.io/spielr/index.html`
 
-SQL aus `supabase_setup.sql` einmalig im Supabase SQL Editor ausführen.
+### 4. GitHub Secrets setzen
+→ Repository → Settings → Secrets and variables → Actions  
+→ `SUPABASE_URL` = `https://djhxhkhcuvuyozyqmnew.supabase.co`  
+→ `SUPABASE_ANON_KEY` = dein Publishable API Key
 
-## Deploy
+### 5. GitHub Pages aktivieren
+→ Repository → Settings → Pages  
+→ Source: **GitHub Actions**
 
-Jeder Push auf `main` deployt automatisch auf GitHub Pages.
-
-Manuelle Auslösung: **Actions** → **Deploy Spielr to GitHub Pages** → **Run workflow**
+Jeder Push auf `main` deployt automatisch. ~1 Minute bis live.
