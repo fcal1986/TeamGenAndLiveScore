@@ -25,10 +25,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inject Supabase Keys
+      - name: Inject Supabase Keys into index.html
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          sed -i "s|'%%SUPABASE_URL%%'|'${{ secrets.SUPABASE_URL }}'|g" index.html
-          sed -i "s|'%%SUPABASE_ANON_KEY%%'|'${{ secrets.SUPABASE_ANON_KEY }}'|g" index.html
+          sed -i "s|'%%SUPABASE_URL%%'|'${SUPABASE_URL}'|g" index.html
+          sed -i "s|'%%SUPABASE_ANON_KEY%%'|'${SUPABASE_ANON_KEY}'|g" index.html
+          # Verify injection succeeded
+          grep -q "${SUPABASE_URL}" index.html && echo "✅ URL injected" || echo "❌ URL injection failed"
+          grep -q "${SUPABASE_ANON_KEY}" index.html && echo "✅ KEY injected" || echo "❌ KEY injection failed"
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
