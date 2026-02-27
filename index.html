@@ -909,7 +909,7 @@
     <!-- ① Main form (Google + Magic Link) -->
     <div id="auth-form">
 
-      <!-- Google OAuth — Primary -->
+      <!-- Google Button: Median → native SDK | Browser → OAuth -->
       <button class="auth-google-btn" id="auth-google-btn" onclick="signInWithGoogle()">
         <svg class="auth-google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -919,6 +919,14 @@
         </svg>
         Mit Google anmelden
       </button>
+
+      <!-- Median Social Login Plugin nicht aktiv → Hinweis -->
+      <div id="auth-google-plugin-hint" style="display:none;margin-top:-8px;margin-bottom:12px;
+        background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);
+        border-radius:8px;padding:10px 12px;font-size:12px;color:#fbbf24;text-align:center;line-height:1.5">
+        ⚠️ Median Social Login Plugin nicht aktiviert.<br>
+        Google Login nur im Browser verfügbar.
+      </div>
 
       <!-- Divider -->
       <div class="auth-divider">oder per E-Mail</div>
@@ -963,6 +971,9 @@
   <div id="debug-header">
     <span id="debug-title">🐛 AUTH DEBUG</span>
     <span id="debug-env">—</span>
+    <button id="debug-copy" onclick="debugCopy()" title="Log kopieren"
+      style="background:none;border:1px solid #1e293b;color:#64748b;font-size:10px;
+      padding:2px 8px;border-radius:4px;cursor:pointer;margin-right:2px">COPY</button>
     <button id="debug-clear" onclick="debugClear()">CLEAR</button>
     <button id="debug-close" onclick="debugToggle()">✕</button>
   </div>
@@ -1542,6 +1553,42 @@
     if (badge) badge.style.display = 'none';
   };
 
+  window.debugCopy = function() {
+    const log = document.getElementById('debug-log');
+    if (!log) return;
+    const lines = Array.from(log.querySelectorAll('.dlog')).map(row => {
+      const time = row.querySelector('.dlog-time')?.textContent || '';
+      const icon = row.querySelector('.dlog-icon')?.textContent || '';
+      const msg  = row.querySelector('.dlog-msg')?.textContent || '';
+      return time + ' ' + icon + ' ' + msg;
+    }).join('\n');
+    const header = '=== SPIELR AUTH DEBUG LOG ===\n'
+      + 'Zeit: ' + new Date().toISOString() + '\n'
+      + 'URL: ' + window.location.href + '\n'
+      + 'UA: ' + navigator.userAgent + '\n'
+      + '============================\n';
+    const text = header + lines;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('debug-copy');
+        if (btn) { btn.textContent = '✓ OK'; btn.style.color = '#4ade80';
+          setTimeout(() => { btn.textContent = 'COPY'; btn.style.color = '#64748b'; }, 2000); }
+      }).catch(() => _debugCopyFallback(text));
+    } else {
+      _debugCopyFallback(text);
+    }
+  };
+
+  function _debugCopyFallback(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+    const btn = document.getElementById('debug-copy');
+    if (btn) { btn.textContent = '✓ OK'; setTimeout(() => btn.textContent = 'COPY', 2000); }
+  }
+
   // Toggle-Button anzeigen & Umgebung erkennen
   document.addEventListener('DOMContentLoaded', function() {
     const toggle = document.getElementById('debug-toggle');
@@ -1587,19 +1634,28 @@
     function checkBridge(attempt) {
       const gn = window.gonative || window.median;
       if (gn) {
-        dbg('gonative/median Bridge verfügbar (Versuch ' + attempt + ')', 'ok');
-        dbg('Bridge keys: ' + Object.keys(gn).join(', '), 'info');
-        // Nested objects
-        ['inAppBrowser','open','browser','webview'].forEach(k => {
-          if (gn[k]) dbg('  → ' + k + ': ' + Object.keys(gn[k]).join(', '), 'info');
+        dbg('Bridge verfügbar nach Versuch ' + attempt + ': ' + (window.median ? 'window.median' : 'window.gonative'), 'ok');
+        dbg('Top-Keys: ' + Object.keys(gn).join(', '), 'info');
+        // Social Login prüfen — DAS ist entscheidend
+        if (gn.socialLogin) {
+          dbg('socialLogin: ' + Object.keys(gn.socialLogin).join(', '), 'ok');
+          if (gn.socialLogin.google) dbg('google.login: ' + typeof gn.socialLogin.google.login, 'ok');
+          else dbg('socialLogin.google: NICHT vorhanden → Social Login Plugin nicht aktiviert!', 'err');
+        } else {
+          dbg('socialLogin: NICHT vorhanden → Native Plugin nicht aktiviert!', 'err');
+          dbg('→ Im Median Dashboard: Native Plugins → Social Login → Google aktivieren', 'warn');
+        }
+        // Alle relevanten Bridge-Keys
+        ['inAppBrowser','open','browser','auth0','webview','statusbar'].forEach(k => {
+          if (gn[k]) dbg('  bridge.' + k + ': ' + Object.keys(gn[k]).slice(0,5).join(', '), 'info');
         });
-      } else if (attempt < 5) {
-        dbg('Bridge noch nicht da (Versuch ' + attempt + '), retry in 500ms…', 'warn');
-        setTimeout(() => checkBridge(attempt + 1), 500);
+      } else if (attempt < 8) {
+        if (attempt === 1) dbg('Bridge noch nicht injiziert, warte…', 'info');
+        setTimeout(() => checkBridge(attempt + 1), attempt < 4 ? 300 : 600);
       } else {
-        dbg('Bridge nach 5 Versuchen nicht gefunden!', 'err');
-        dbg('Verfügbare window keys mit "native"/"median"/"go": ' +
-          Object.keys(window).filter(k => /native|median|gonative/i.test(k)).join(', ') || 'keine', 'warn');
+        dbg('⚠ Bridge nach ' + attempt + ' Versuchen nicht gefunden', 'warn');
+        const bridgeKeys = Object.keys(window).filter(k => /native|median|gonative|bridge/i.test(k));
+        dbg('Relevante window-Keys: ' + (bridgeKeys.join(', ') || 'keine'), bridgeKeys.length ? 'info' : 'warn');
       }
     }
     checkBridge(1);
@@ -1794,87 +1850,109 @@ function showApp(user) {
   }
 }
 
-// ── Google OAuth — Median Protocol + Browser kompatibel ──
+// ── Google OAuth: Median native SDK ODER Browser OAuth ──
+// Warum: Google verbietet OAuth in WebViews. Median Social Login
+// Plugin nutzt natives Google SDK → kein Browser nötig.
+// Docs: https://docs.median.co/docs/social-login-javascript-callbacks
 async function signInWithGoogle() {
   dbg('--- Google Login gestartet ---', 'info');
-  if (!_sb) {
-    dbg('FEHLER: Supabase nicht konfiguriert', 'err');
-    showAuthError('Supabase nicht konfiguriert.'); return;
-  }
+  if (!_sb) { dbg('FEHLER: _sb null', 'err'); showAuthError('Supabase nicht konfiguriert.'); return; }
+
   const btn = document.getElementById('auth-google-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Weiterleitung…'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Anmelden…'; }
 
   const ua = navigator.userAgent;
   const isMedian = ua.indexOf('median') > -1 || ua.indexOf('gonative') > -1;
-
-  // gonative kann async injiziert werden — nochmal prüfen
   const gn = window.gonative || window.median;
-  dbg('isMedian (UA): ' + isMedian, 'info');
-  dbg('window.gonative: ' + !!window.gonative, window.gonative ? 'ok' : 'warn');
-  dbg('window.median: ' + !!window.median, 'info');
-  if (gn) dbg('Bridge keys: ' + Object.keys(gn).slice(0,8).join(', '), 'info');
 
+  dbg('isMedian: ' + isMedian, 'info');
+  dbg('window.median: ' + !!window.median, window.median ? 'ok' : 'warn');
+  dbg('window.gonative: ' + !!window.gonative, window.gonative ? 'ok' : 'warn');
+  if (gn) {
+    dbg('Bridge top-keys: ' + Object.keys(gn).join(', '), 'info');
+    if (gn.socialLogin) dbg('socialLogin keys: ' + Object.keys(gn.socialLogin).join(', '), 'ok');
+    if (gn.socialLogin?.google) dbg('google keys: ' + Object.keys(gn.socialLogin.google).join(', '), 'ok');
+  }
+
+  // ── PFAD A: Median + Social Login Plugin verfügbar ──
+  const hasSocialLogin = !!(gn?.socialLogin?.google?.login);
+  dbg('Social Login Plugin: ' + hasSocialLogin, hasSocialLogin ? 'ok' : 'warn');
+
+  if (isMedian && hasSocialLogin) {
+    dbg('→ Median native Google SDK wird aufgerufen', 'ok');
+    try {
+      gn.socialLogin.google.login({
+        callback: async function(response) {
+          dbg('Google SDK Callback: ' + JSON.stringify(response).substring(0, 120), 'evt');
+          if (response.error) {
+            dbg('Google SDK Fehler: ' + response.error, 'err');
+            showAuthError('Google Login fehlgeschlagen: ' + response.error);
+            if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+            return;
+          }
+          // Median Social Login gibt idToken zurück
+          // → direkt an Supabase als ID Token übergeben
+          const idToken = response.idToken || response.id_token;
+          dbg('idToken: ' + (idToken ? idToken.substring(0,40)+'…' : 'FEHLT!'), idToken ? 'ok' : 'err');
+          if (!idToken) {
+            dbg('Vollständige Response: ' + JSON.stringify(response), 'err');
+            showAuthError('Kein ID Token erhalten. Social Login Plugin konfiguriert?');
+            if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+            return;
+          }
+          dbg('Supabase signInWithIdToken wird aufgerufen…', 'info');
+          try {
+            const { data: signInData, error: signInErr } = await _sb.auth.signInWithIdToken({
+              provider: 'google',
+              token: idToken
+            });
+            if (signInErr) {
+              dbg('signInWithIdToken Fehler: ' + signInErr.message, 'err');
+              showAuthError('Anmeldung fehlgeschlagen: ' + signInErr.message);
+              if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+            } else {
+              dbg('✅ Supabase Login via Google erfolgreich: ' + signInData?.user?.email, 'ok');
+              // onAuthStateChange SIGNED_IN feuert automatisch → App wird gezeigt
+            }
+          } catch(supErr) {
+            dbg('Supabase Exception: ' + supErr.message, 'err');
+            showAuthError('Fehler: ' + supErr.message);
+            if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+          }
+        }
+      });
+    } catch(sdkErr) {
+      dbg('SDK Exception: ' + sdkErr.message, 'err');
+      showAuthError('Google SDK Fehler: ' + sdkErr.message);
+      if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+    }
+    return;
+  }
+
+  // ── PFAD B: Median aber KEIN Social Login Plugin ──
+  if (isMedian && !hasSocialLogin) {
+    dbg('→ Median ohne Social Login Plugin → Hinweis zeigen', 'warn');
+    const hint = document.getElementById('auth-google-plugin-hint');
+    if (hint) hint.style.display = 'block';
+    if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+    return;
+  }
+
+  // ── PFAD C: Browser → normales OAuth ──
+  dbg('→ Browser-Modus: OAuth Redirect', 'info');
   try {
-    dbg('signInWithOAuth wird aufgerufen…', 'info');
     const { data, error } = await _sb.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: APP_URL,
-        skipBrowserRedirect: true,
         queryParams: { access_type: 'offline', prompt: 'select_account' }
       }
     });
-    if (error) { dbg('OAuth Fehler: ' + error.message, 'err'); throw error; }
-
-    const oauthUrl = data?.url;
-    dbg('OAuth URL: ' + (oauthUrl ? oauthUrl.substring(0,80)+'…' : 'NULL'), oauthUrl ? 'ok' : 'err');
-    if (!oauthUrl) throw new Error('Keine OAuth URL erhalten');
-
-    if (isMedian) {
-      // ── Median: InAppBrowser via JS Protocol öffnen ──
-      // Median schließt den InAppBrowser automatisch wenn die URL
-      // auf unsere App-Domain matcht (via regexInternalExternal → internal)
-      // Das löst dann onAuthStateChange in der WebView aus.
-
-      // Methode 1: Median JS Bridge Protocol (sicherste Methode)
-      const medianUrl = 'median://inAppBrowser/open?url=' + encodeURIComponent(oauthUrl);
-      dbg('→ Versuche median:// Protocol: ' + medianUrl.substring(0,60)+'…', 'info');
-
-      // Teste ob median:// Protocol funktioniert via iframe trick
-      let protocolWorked = false;
-      try {
-        // Median Protocol via iframe (verhindert Page-Navigation falls es nicht klappt)
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-        iframe.src = medianUrl;
-        setTimeout(() => document.body.removeChild(iframe), 500);
-        protocolWorked = true;
-        dbg('→ median:// iframe gesendet', 'ok');
-      } catch(ifrErr) {
-        dbg('→ iframe Fehler: ' + ifrErr.message, 'warn');
-      }
-
-      // Fallback nach 1s: direkt via window.location wenn Protocol nicht reagiert
-      setTimeout(() => {
-        // Prüfen ob wir noch auf der Login-Seite sind (kein Redirect passiert)
-        const authScreen = document.getElementById('screen-auth');
-        const stillOnAuth = authScreen && authScreen.style.display !== 'none';
-        if (stillOnAuth) {
-          dbg('→ Protocol-Fallback: window.location.href = oauthUrl', 'warn');
-          window.location.href = oauthUrl;
-        }
-      }, 1000);
-
-    } else {
-      // Browser: normaler Redirect
-      dbg('→ Browser-Modus: window.location.href', 'info');
-      window.location.href = oauthUrl;
-    }
-
+    if (error) throw error;
+    dbg('OAuth Redirect gestartet', 'ok');
   } catch(e) {
-    dbg('EXCEPTION: ' + e.message, 'err');
-    showAuthError('Google Login fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
+    dbg('OAuth Fehler: ' + e.message, 'err');
+    showAuthError('Google Login fehlgeschlagen: ' + e.message);
     if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
   }
 }
