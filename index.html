@@ -787,6 +787,57 @@
     to   { opacity: 1; transform: translateY(0); }
   }
   .auth-loading-text { font-size: 14px; color: var(--text2); font-weight: 600; }
+  /* ══ DEBUG PANEL ══ */
+  #debug-panel {
+    display: none;
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 9999;
+    background: #0a0a0f; border-top: 2px solid #4f7fff;
+    max-height: 45vh; flex-direction: column;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  #debug-panel.open { display: flex; }
+  #debug-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: #111827; border-bottom: 1px solid #1e293b;
+    flex-shrink: 0;
+  }
+  #debug-title { font-size: 11px; font-weight: 700; color: #4f7fff; letter-spacing: .08em; }
+  #debug-env { font-size: 10px; color: #64748b; }
+  #debug-clear { background: none; border: 1px solid #1e293b; color: #64748b;
+    font-size: 10px; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
+  #debug-clear:hover { border-color: #ef4444; color: #ef4444; }
+  #debug-close { background: none; border: none; color: #64748b; font-size: 16px;
+    cursor: pointer; padding: 0 4px; line-height: 1; }
+  #debug-log {
+    overflow-y: auto; flex: 1; padding: 6px 0;
+    font-size: 11px; line-height: 1.6;
+  }
+  .dlog { display: flex; gap: 8px; padding: 3px 12px; border-bottom: 1px solid #0f172a; }
+  .dlog:hover { background: #0f172a; }
+  .dlog-time { color: #475569; flex-shrink: 0; font-size: 10px; padding-top: 1px; }
+  .dlog-icon { flex-shrink: 0; }
+  .dlog-msg { color: #e2e8f0; word-break: break-all; }
+  .dlog.ok   .dlog-msg { color: #4ade80; }
+  .dlog.err  .dlog-msg { color: #f87171; }
+  .dlog.warn .dlog-msg { color: #fbbf24; }
+  .dlog.info .dlog-msg { color: #93c5fd; }
+  .dlog.evt  .dlog-msg { color: #c084fc; }
+  #debug-toggle {
+    position: fixed; bottom: 16px; right: 16px; z-index: 9998;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #1e293b; border: 2px solid #4f7fff;
+    color: #4f7fff; font-size: 18px; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    transition: all .2s;
+  }
+  #debug-toggle:hover { background: #4f7fff; color: #fff; }
+  #debug-badge {
+    position: absolute; top: -4px; right: -4px;
+    background: #ef4444; color: #fff; font-size: 9px; font-weight: 700;
+    border-radius: 8px; padding: 1px 4px; min-width: 16px; text-align: center;
+    display: none;
+  }
 
   /* ── Sync indicator ── */
   #sync-indicator {
@@ -900,6 +951,22 @@
 
     <div class="auth-hint">Kein Passwort nötig · Deine Daten sind sicher</div>
   </div>
+</div>
+
+
+<!-- ══ DEBUG PANEL ══ -->
+<button id="debug-toggle" title="Debug Log">
+  🐛
+  <span id="debug-badge"></span>
+</button>
+<div id="debug-panel">
+  <div id="debug-header">
+    <span id="debug-title">🐛 AUTH DEBUG</span>
+    <span id="debug-env">—</span>
+    <button id="debug-clear" onclick="debugClear()">CLEAR</button>
+    <button id="debug-close" onclick="debugToggle()">✕</button>
+  </div>
+  <div id="debug-log"></div>
 </div>
 
 <div class="app">
@@ -1423,6 +1490,119 @@
 </div><!-- /app -->
 
 <script>
+
+// ╔══════════════════════════════════════════════════════╗
+// ║  DEBUG SYSTEM                                         ║
+// ╚══════════════════════════════════════════════════════╝
+(function() {
+  let _debugErrors = 0;
+  let _debugInited = false;
+
+  function _ts() {
+    const d = new Date();
+    return d.getHours().toString().padStart(2,'0') + ':'
+      + d.getMinutes().toString().padStart(2,'0') + ':'
+      + d.getSeconds().toString().padStart(2,'0') + '.'
+      + d.getMilliseconds().toString().padStart(3,'0');
+  }
+
+  function _icon(type) {
+    return { ok:'✅', err:'❌', warn:'⚠️', info:'ℹ️', evt:'🔔' }[type] || '·';
+  }
+
+  window.dbg = function(msg, type) {
+    type = type || 'info';
+    const log = document.getElementById('debug-log');
+    if (!log) { console.log('[DBG]', msg); return; }
+    const row = document.createElement('div');
+    row.className = 'dlog ' + type;
+    row.innerHTML = '<span class="dlog-time">' + _ts() + '</span>'
+      + '<span class="dlog-icon">' + _icon(type) + '</span>'
+      + '<span class="dlog-msg">' + String(msg).replace(/</g,'&lt;') + '</span>';
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+    if (type === 'err') {
+      _debugErrors++;
+      const badge = document.getElementById('debug-badge');
+      if (badge) { badge.textContent = _debugErrors; badge.style.display = 'block'; }
+    }
+    console.log('[DBG ' + type.toUpperCase() + ']', msg);
+  };
+
+  window.debugToggle = function() {
+    const panel = document.getElementById('debug-panel');
+    if (panel) panel.classList.toggle('open');
+  };
+
+  window.debugClear = function() {
+    const log = document.getElementById('debug-log');
+    if (log) log.innerHTML = '';
+    _debugErrors = 0;
+    const badge = document.getElementById('debug-badge');
+    if (badge) badge.style.display = 'none';
+  };
+
+  // Toggle-Button anzeigen & Umgebung erkennen
+  document.addEventListener('DOMContentLoaded', function() {
+    const toggle = document.getElementById('debug-toggle');
+    const envEl = document.getElementById('debug-env');
+
+    // Umgebung erkennen
+    const ua = navigator.userAgent || '';
+    const isMedian = ua.indexOf('median') > -1 || ua.indexOf('gonative') > -1;
+    const isGoNative = !!window.gonative;
+    const isIOS = /iPad|iPhone|iPod/.test(ua);
+    const isAndroid = /Android/.test(ua);
+
+    const env = (isMedian ? 'MEDIAN' : 'BROWSER')
+      + ' | ' + (isAndroid ? 'Android' : isIOS ? 'iOS' : 'Desktop')
+      + (isGoNative ? ' | gonative✓' : '');
+
+    if (envEl) envEl.textContent = env;
+
+    // Debug immer zeigen (auch im Browser zum Testen)
+    if (toggle) toggle.style.display = 'flex';
+    toggle && toggle.addEventListener('click', debugToggle);
+
+    dbg('=== SPIELR AUTH DEBUG ===', 'info');
+    dbg('Umgebung: ' + env, 'info');
+    dbg('URL: ' + window.location.href, 'info');
+    dbg('UserAgent: ' + ua.substring(0, 80), 'info');
+
+    // Hash/Query-Parameter prüfen (OAuth Callback Tokens)
+    const hash = window.location.hash;
+    const search = window.location.search;
+    if (hash && hash.length > 1) {
+      dbg('Hash gefunden: ' + hash.substring(0, 60) + '…', 'warn');
+      if (hash.includes('access_token')) dbg('✦ access_token in Hash → OAuth Callback erkannt!', 'ok');
+      if (hash.includes('error')) dbg('Hash-Fehler: ' + hash, 'err');
+    } else {
+      dbg('Kein OAuth-Hash in URL', 'info');
+    }
+    if (search && search.includes('code=')) {
+      dbg('PKCE code in URL erkannt: ' + search.substring(0, 60), 'ok');
+    }
+
+    // window.gonative Objekt
+    if (window.gonative) {
+      dbg('window.gonative: verfügbar', 'ok');
+      dbg('gonative keys: ' + Object.keys(window.gonative).join(', '), 'info');
+    } else {
+      dbg('window.gonative: NICHT verfügbar' + (isMedian ? ' (median UA aber kein JS-Bridge?)' : ''), isMedian ? 'warn' : 'info');
+    }
+
+    _debugInited = true;
+  });
+
+  // Globale Fehler abfangen
+  window.addEventListener('error', function(e) {
+    dbg('JS ERROR: ' + e.message + ' @ ' + (e.filename||'?') + ':' + (e.lineno||'?'), 'err');
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    dbg('UNHANDLED PROMISE: ' + (e.reason?.message || String(e.reason)), 'err');
+  });
+})();
+
 // ╔══════════════════════════════════════════════════════╗
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
@@ -1604,36 +1784,55 @@ function showApp(user) {
 
 // ── Google OAuth — Median + Browser kompatibel ──
 async function signInWithGoogle() {
-  if (!_sb) { showAuthError('Supabase nicht konfiguriert.'); return; }
+  dbg('--- Google Login gestartet ---', 'info');
+  if (!_sb) {
+    dbg('FEHLER: Supabase nicht konfiguriert (_sb ist null)', 'err');
+    showAuthError('Supabase nicht konfiguriert.'); return;
+  }
   const btn = document.getElementById('auth-google-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Weiterleitung…'; }
 
+  const ua = navigator.userAgent;
+  const isMedianUA = ua.indexOf('median') > -1 || ua.indexOf('gonative') > -1;
+  const hasGonativeJS = !!window.gonative;
+  const hasInAppBrowser = !!(window.gonative && window.gonative.inAppBrowser);
+  dbg('isMedian (UA): ' + isMedianUA, 'info');
+  dbg('gonative JS-Bridge: ' + hasGonativeJS, hasGonativeJS ? 'ok' : 'warn');
+  dbg('inAppBrowser API: ' + hasInAppBrowser, hasInAppBrowser ? 'ok' : 'warn');
+  dbg('redirectTo: ' + APP_URL, 'info');
+
   try {
-    // OAuth URL von Supabase holen (kein automatischer Redirect)
+    dbg('Rufe _sb.auth.signInWithOAuth auf…', 'info');
     const { data, error } = await _sb.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: APP_URL,
-        skipBrowserRedirect: true,   // Supabase öffnet NICHT selbst den Browser
+        skipBrowserRedirect: true,
         queryParams: { access_type: 'offline', prompt: 'select_account' }
       }
     });
-    if (error) throw error;
+    if (error) {
+      dbg('signInWithOAuth Fehler: ' + error.message, 'err');
+      throw error;
+    }
 
     const oauthUrl = data?.url;
-    if (!oauthUrl) throw new Error('Keine OAuth URL erhalten');
+    dbg('OAuth URL erhalten: ' + (oauthUrl ? oauthUrl.substring(0,80)+'…' : 'NULL!'), oauthUrl ? 'ok' : 'err');
+    if (!oauthUrl) throw new Error('Keine OAuth URL von Supabase erhalten');
 
-    // Median: InAppBrowser nutzen damit Session in der App bleibt
-    const isMedian = !!(window.gonative || (window.webkit && window.webkit.messageHandlers));
-    if (isMedian && window.gonative && window.gonative.inAppBrowser) {
-      // Median InAppBrowser öffnet Google Login IN der App
+    if (isMedianUA && hasGonativeJS && hasInAppBrowser) {
+      dbg('→ Öffne via gonative.inAppBrowser.open()', 'ok');
       window.gonative.inAppBrowser.open({ url: oauthUrl });
+    } else if (isMedianUA && hasGonativeJS) {
+      dbg('→ gonative vorhanden aber kein inAppBrowser — versuche window.location', 'warn');
+      window.location.href = oauthUrl;
     } else {
-      // Browser-Fallback: normaler Redirect
+      dbg('→ Browser-Modus: window.location.href Redirect', 'info');
       window.location.href = oauthUrl;
     }
 
   } catch(e) {
+    dbg('EXCEPTION in signInWithGoogle: ' + e.message, 'err');
     showAuthError('Google Login fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
     if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
   }
@@ -1816,58 +2015,74 @@ async function initApp() {
 
   // ── 3. No Supabase → pure localStorage mode ──
   if (!_sb) {
+    dbg('Supabase NICHT konfiguriert → localStorage-Modus', 'warn');
     loadLocal();
     document.getElementById('screen-auth').style.display = 'none';
     renderLists();
     return;
   }
+  dbg('Supabase client: OK', 'ok');
+  dbg('Supabase URL: ' + (SUPABASE_URL || 'LEER!'), SUPABASE_URL ? 'ok' : 'err');
 
   // ── 4. Show loading while we check session ──
   showAuthLoading('Anmeldung prüfen…');
 
   // ── onAuthStateChange ZUERST registrieren ──
-  // Wichtig: Listener muss aktiv sein BEVOR getSession aufgerufen wird,
-  // damit OAuth-Callbacks (PKCE code in URL) korrekt verarbeitet werden
   _sb.auth.onAuthStateChange(async (event, session) => {
+    dbg('onAuthStateChange: event=' + event + ' | user=' + (session?.user?.email || 'none'), 'evt');
     if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
       if (!_authInitDone) {
+        dbg('→ Erster Login erkannt, lade Daten…', 'ok');
         _authInitDone = true;
         showAuthLoading('Daten laden…');
         const loaded = await loadFromSupabase(session.user.id);
+        dbg('Supabase Daten geladen: ' + loaded, loaded ? 'ok' : 'warn');
         if (!loaded) loadLocal();
         showApp(session.user);
         renderLists();
         showScreen('screen-lists');
         hideAuthLoading();
+        dbg('✅ Eingeloggt als: ' + session.user.email, 'ok');
       } else {
+        dbg('→ Token-Refresh (bereits eingeloggt)', 'info');
         _currentUserId = session.user.id;
       }
     } else if (event === 'SIGNED_OUT') {
+      dbg('→ SIGNED_OUT empfangen', 'warn');
       _authInitDone = false;
       _currentUserId = null;
       hideAuthLoading();
       showAuthScreen();
+    } else {
+      dbg('→ Anderes Event ohne Session: ' + event, 'info');
     }
   });
 
   // ── getSession: bestehende Session prüfen (inkl. OAuth PKCE Austausch) ──
-  const { data: { session: initialSession } } = await _sb.auth.getSession();
+  dbg('getSession() wird aufgerufen…', 'info');
+  const { data: { session: initialSession }, error: sessionError } = await _sb.auth.getSession();
+  dbg('getSession() Ergebnis: ' + (initialSession ? 'Session vorhanden (' + initialSession.user?.email + ')' : 'Keine Session') + (sessionError ? ' | FEHLER: ' + sessionError.message : ''), initialSession ? 'ok' : 'info');
 
   if (initialSession?.user && !_authInitDone) {
+    dbg('→ Bestehende Session gefunden, lade App…', 'ok');
     _authInitDone = true;
     showAuthLoading('Daten laden…');
     const loaded = await loadFromSupabase(initialSession.user.id);
+    dbg('Supabase Daten geladen: ' + loaded, loaded ? 'ok' : 'warn');
     if (!loaded) loadLocal();
     showApp(initialSession.user);
     renderLists();
     showScreen('screen-lists');
     hideAuthLoading();
+    dbg('✅ Eingeloggt (bestehende Session): ' + initialSession.user.email, 'ok');
   } else if (!initialSession && !_authInitDone) {
+    dbg('→ Keine Session → Login-Screen anzeigen', 'info');
     _authInitDone = true;
     hideAuthLoading();
     showAuthScreen();
+  } else {
+    dbg('→ _authInitDone bereits true (onAuthStateChange hat zuerst gefeuert)', 'info');
   }
-  // Falls _authInitDone bereits true (durch onAuthStateChange): nichts tun
 }
 
 initApp();
