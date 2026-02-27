@@ -27,8 +27,8 @@ jobs:
 
       - name: Inject Supabase Keys
         run: |
-          sed -i "s|'%%SUPABASE_URL%%'|'${{ secrets.SUPABASE_URL }}'|g" zufallsgenerator.html
-          sed -i "s|'%%SUPABASE_ANON_KEY%%'|'${{ secrets.SUPABASE_ANON_KEY }}'|g" zufallsgenerator.html
+          sed -i "s|'%%SUPABASE_URL%%'|'${{ secrets.SUPABASE_URL }}'|g" index.html
+          sed -i "s|'%%SUPABASE_ANON_KEY%%'|'${{ secrets.SUPABASE_ANON_KEY }}'|g" index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
