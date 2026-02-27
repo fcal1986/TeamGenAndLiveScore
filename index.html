@@ -1805,11 +1805,32 @@ async function initApp() {
   // ── 4. Show loading while we check session ──
   showAuthLoading('Anmeldung prüfen…');
 
-  // ── 5. onAuthStateChange — single source of truth ──
-  // Fires immediately with current session on page load (incl. OAuth redirect)
+  // ── 5. getSession() als verlässlicher Einstiegspunkt ──
+  // onAuthStateChange feuert INITIAL_SESSION nicht zuverlässig auf allen
+  // Supabase-JS-v2-Versionen → getSession() explizit aufrufen.
+  let _listenerActive = false;
+
+  const { data: { session: initialSession } } = await _sb.auth.getSession();
+
+  if (initialSession?.user) {
+    _authInitDone = true;
+    showAuthLoading('Daten laden…');
+    const loaded = await loadFromSupabase(initialSession.user.id);
+    if (!loaded) loadLocal();
+    showApp(initialSession.user);
+    renderLists();
+    showScreen('screen-lists');
+    hideAuthLoading();
+  } else {
+    hideAuthLoading();
+    showAuthScreen();
+  }
+
+  // ── 6. onAuthStateChange — nur für spätere Events (Login/Logout) ──
   _sb.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-      if (session?.user && !_authInitDone) {
+    if (event === 'SIGNED_IN' && session?.user) {
+      if (!_authInitDone) {
+        // Erster Login (Magic Link redirect oder Google OAuth callback)
         _authInitDone = true;
         showAuthLoading('Daten laden…');
         const loaded = await loadFromSupabase(session.user.id);
@@ -1817,17 +1838,16 @@ async function initApp() {
         showApp(session.user);
         renderLists();
         showScreen('screen-lists');
-      } else if (session?.user && _authInitDone) {
-        // TOKEN_REFRESHED after initial — just update userId silently
+        hideAuthLoading();
+      } else {
+        // Session refresh — nur userId aktualisieren, kein Re-Render
         _currentUserId = session.user.id;
       }
+    } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+      _currentUserId = session.user.id;
     } else if (event === 'SIGNED_OUT') {
       _authInitDone = false;
-      hideAuthLoading();
-      showAuthScreen();
-    } else if (!session && !_authInitDone) {
-      // No session at startup
-      _authInitDone = true;
+      _currentUserId = null;
       hideAuthLoading();
       showAuthScreen();
     }
