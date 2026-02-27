@@ -1,0 +1,32 @@
+{
+  "webviewUrl": "https://fcal1986.github.io/TeamGenAndLiveScore/index.html",
+  "appName": "Spielr",
+
+  "links": {
+    "internal": {
+      "patterns": [
+        "https://fcal1986.github.io/TeamGenAndLiveScore/*",
+        "https://djhxhkhcuvuyozyqmnew.supabase.co/auth/v1/callback*"
+      ]
+    },
+    "external": {
+      "patterns": [
+        "https://accounts.google.com/*",
+        "https://*.google.com/o/oauth2/*"
+      ]
+    }
+  },
+
+  "inAppBrowser": {
+    "enabled": true,
+    "closeOnRedirectUrls": [
+      "https://fcal1986.github.io/TeamGenAndLiveScore/index.html"
+    ]
+  },
+
+  "deepLinking": {
+    "enabled": true,
+    "domains": ["fcal1986.github.io"],
+    "paths": ["/TeamGenAndLiveScore/*"]
+  }
+}

@@ -1554,9 +1554,13 @@ function setSyncStatus(status) {
 // ║  AUTH  –  production-ready, Google OAuth + Magic Link ║
 // ╚══════════════════════════════════════════════════════╝
 
-// ── Redirect URL: immer aktueller Origin+Pfad, nie localhost-hardcoded ──
+// ── App-URL: Median-sicher, immer korrekte Production-URL ──
+const APP_URL = 'https://fcal1986.github.io/TeamGenAndLiveScore/index.html';
+
 function getRedirectURL() {
-  return window.location.origin + window.location.pathname;
+  // Median WebView erkennen (gonative global object)
+  const isMedian = !!(window.gonative || (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.gonative));
+  return isMedian ? APP_URL : (window.location.origin + window.location.pathname);
 }
 
 // ── Loading overlay ──
@@ -1598,21 +1602,37 @@ function showApp(user) {
   }
 }
 
-// ── Google OAuth ──
+// ── Google OAuth — Median + Browser kompatibel ──
 async function signInWithGoogle() {
   if (!_sb) { showAuthError('Supabase nicht konfiguriert.'); return; }
   const btn = document.getElementById('auth-google-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Weiterleitung…'; }
+
   try {
-    const { error } = await _sb.auth.signInWithOAuth({
+    // OAuth URL von Supabase holen (kein automatischer Redirect)
+    const { data, error } = await _sb.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: getRedirectURL(),
+        redirectTo: APP_URL,
+        skipBrowserRedirect: true,   // Supabase öffnet NICHT selbst den Browser
         queryParams: { access_type: 'offline', prompt: 'select_account' }
       }
     });
     if (error) throw error;
-    // Browser leitet weiter — Button bleibt disabled
+
+    const oauthUrl = data?.url;
+    if (!oauthUrl) throw new Error('Keine OAuth URL erhalten');
+
+    // Median: InAppBrowser nutzen damit Session in der App bleibt
+    const isMedian = !!(window.gonative || (window.webkit && window.webkit.messageHandlers));
+    if (isMedian && window.gonative && window.gonative.inAppBrowser) {
+      // Median InAppBrowser öffnet Google Login IN der App
+      window.gonative.inAppBrowser.open({ url: oauthUrl });
+    } else {
+      // Browser-Fallback: normaler Redirect
+      window.location.href = oauthUrl;
+    }
+
   } catch(e) {
     showAuthError('Google Login fehlgeschlagen: ' + (e.message || 'Unbekannter Fehler'));
     if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
@@ -1805,32 +1825,12 @@ async function initApp() {
   // ── 4. Show loading while we check session ──
   showAuthLoading('Anmeldung prüfen…');
 
-  // ── 5. getSession() als verlässlicher Einstiegspunkt ──
-  // onAuthStateChange feuert INITIAL_SESSION nicht zuverlässig auf allen
-  // Supabase-JS-v2-Versionen → getSession() explizit aufrufen.
-  let _listenerActive = false;
-
-  const { data: { session: initialSession } } = await _sb.auth.getSession();
-
-  if (initialSession?.user) {
-    _authInitDone = true;
-    showAuthLoading('Daten laden…');
-    const loaded = await loadFromSupabase(initialSession.user.id);
-    if (!loaded) loadLocal();
-    showApp(initialSession.user);
-    renderLists();
-    showScreen('screen-lists');
-    hideAuthLoading();
-  } else {
-    hideAuthLoading();
-    showAuthScreen();
-  }
-
-  // ── 6. onAuthStateChange — nur für spätere Events (Login/Logout) ──
+  // ── onAuthStateChange ZUERST registrieren ──
+  // Wichtig: Listener muss aktiv sein BEVOR getSession aufgerufen wird,
+  // damit OAuth-Callbacks (PKCE code in URL) korrekt verarbeitet werden
   _sb.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session?.user) {
+    if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
       if (!_authInitDone) {
-        // Erster Login (Magic Link redirect oder Google OAuth callback)
         _authInitDone = true;
         showAuthLoading('Daten laden…');
         const loaded = await loadFromSupabase(session.user.id);
@@ -1840,11 +1840,8 @@ async function initApp() {
         showScreen('screen-lists');
         hideAuthLoading();
       } else {
-        // Session refresh — nur userId aktualisieren, kein Re-Render
         _currentUserId = session.user.id;
       }
-    } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-      _currentUserId = session.user.id;
     } else if (event === 'SIGNED_OUT') {
       _authInitDone = false;
       _currentUserId = null;
@@ -1852,6 +1849,25 @@ async function initApp() {
       showAuthScreen();
     }
   });
+
+  // ── getSession: bestehende Session prüfen (inkl. OAuth PKCE Austausch) ──
+  const { data: { session: initialSession } } = await _sb.auth.getSession();
+
+  if (initialSession?.user && !_authInitDone) {
+    _authInitDone = true;
+    showAuthLoading('Daten laden…');
+    const loaded = await loadFromSupabase(initialSession.user.id);
+    if (!loaded) loadLocal();
+    showApp(initialSession.user);
+    renderLists();
+    showScreen('screen-lists');
+    hideAuthLoading();
+  } else if (!initialSession && !_authInitDone) {
+    _authInitDone = true;
+    hideAuthLoading();
+    showAuthScreen();
+  }
+  // Falls _authInitDone bereits true (durch onAuthStateChange): nichts tun
 }
 
 initApp();
