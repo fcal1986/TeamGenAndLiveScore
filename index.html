@@ -999,7 +999,7 @@
       <div class="auth-sent-title" style="font-size:17px;text-align:center;margin-bottom:4px">Code eingeben</div>
       <div class="otp-email-display" id="otp-email-display"></div>
       <div style="text-align:center;font-size:12px;color:var(--text3);margin-bottom:16px">
-        6-stelliger Code · gültig 10 Minuten
+        8-stelliger Code · gültig 10 Minuten
       </div>
 
       <!-- 6 Digit Inputs -->
@@ -1031,7 +1031,11 @@
           oninput="otpInput(this,7)" onkeydown="otpKeydown(event,7)" onfocus="this.select()">
       </div>
 
-      <!-- Paste-Button -->
+      <!-- Paste via hidden input (WebView-kompatibel) -->
+      <input type="text" id="otp-hidden-paste"
+        style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;left:-999px"
+        inputmode="numeric" autocomplete="one-time-code"
+        oninput="otpHiddenPasteInput(this)">
       <button class="otp-paste-btn" id="otp-paste-btn" onclick="otpPasteFromClipboard()">
         📋 Code aus Zwischenablage einfügen
       </button>
@@ -1776,7 +1780,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-E';
+const BUILD_VERSION = 'v2026-02-28-F';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2183,28 +2187,73 @@ function otpPaste(event) {
 
 async function otpPasteFromClipboard() {
   const pasteBtn = document.getElementById('otp-paste-btn');
-  try {
-    let text = '';
-    if (navigator.clipboard && navigator.clipboard.readText) {
-      text = await navigator.clipboard.readText();
-    } else {
-      const d = document.getElementById('otp-0');
-      if (d) { d.focus(); d.select(); }
-      showOtpError('Bitte Code manuell einfügen (langes Drücken → Einfügen)');
-      return;
-    }
-    if (_fillOtpFromString(text)) {
-      if (pasteBtn) {
-        pasteBtn.textContent = '✅ Eingefügt!';
-        setTimeout(() => { pasteBtn.innerHTML = '📋 Code aus Zwischenablage einfügen'; }, 2000);
+  hideOtpError();
+
+  // Strategie 1: Moderne Clipboard API (funktioniert in manchen WebViews)
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && _fillOtpFromString(text)) {
+        _otpPasteSuccess(pasteBtn);
+        return;
       }
-    } else {
-      showOtpError('Kein gültiger Code in der Zwischenablage.');
+    } catch(e) { /* weiter mit Strategie 2 */ }
+  }
+
+  // Strategie 2: Hidden Input fokussieren → User-Paste abfangen
+  // Median WebView erlaubt keinen direkten Clipboard-Zugriff, aber
+  // das "Einfügen"-Kontextmenü funktioniert auf fokussierten Inputs
+  const hidden = document.getElementById('otp-hidden-paste');
+  if (hidden) {
+    hidden.value = '';
+    hidden.focus();
+    // Versuche document.execCommand('paste') — funktioniert in manchen WebViews
+    try {
+      document.execCommand('paste');
+      await new Promise(r => setTimeout(r, 100));
+      if (hidden.value && _fillOtpFromString(hidden.value)) {
+        _otpPasteSuccess(pasteBtn);
+        hidden.value = '';
+        return;
+      }
+    } catch(e) { /* weiter */ }
+    // Fallback: Button-Text ändern → User wird zum manuellen Einfügen angeleitet
+    if (pasteBtn) {
+      pasteBtn.innerHTML = '👇 Jetzt hier einfügen (langes Drücken)';
+      pasteBtn.style.borderColor = 'var(--accent)';
+      pasteBtn.style.color = 'var(--accent)';
+      // Nach 3s zurücksetzen
+      setTimeout(() => {
+        pasteBtn.innerHTML = '📋 Code aus Zwischenablage einfügen';
+        pasteBtn.style.borderColor = '';
+        pasteBtn.style.color = '';
+      }, 3000);
     }
-  } catch(e) {
+  }
+}
+
+function otpHiddenPasteInput(el) {
+  // Wird aufgerufen wenn der User in das hidden Input einfügt
+  const text = el.value;
+  el.value = '';
+  const pasteBtn = document.getElementById('otp-paste-btn');
+  if (text && _fillOtpFromString(text)) {
+    _otpPasteSuccess(pasteBtn);
     const d = document.getElementById('otp-0');
-    if (d) { d.focus(); d.select(); }
-    showOtpError('Bitte Code manuell einfügen (langes Drücken → Einfügen)');
+    if (d) d.focus();
+  }
+}
+
+function _otpPasteSuccess(btn) {
+  if (btn) {
+    btn.innerHTML = '✅ Code eingefügt!';
+    btn.style.borderColor = 'var(--accent3)';
+    btn.style.color = 'var(--accent3)';
+    setTimeout(() => {
+      btn.innerHTML = '📋 Code aus Zwischenablage einfügen';
+      btn.style.borderColor = '';
+      btn.style.color = '';
+    }, 2000);
   }
 }
 
