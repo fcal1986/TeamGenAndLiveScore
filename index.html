@@ -1725,6 +1725,10 @@
       const gn = window.gonative || window.median;
       if (gn) {
         dbg('Bridge verfügbar nach Versuch ' + attempt + ': ' + (window.median ? 'window.median' : 'window.gonative'), 'ok');
+      // Netzwerk-Test: fetch zu Supabase direkt prüfen
+      fetch('https://djhxhkhcuvuyozyqmnew.supabase.co/rest/v1/', { method: 'HEAD' })
+        .then(r  => dbg('Netzwerk-Test Supabase: HTTP ' + r.status + ' ✅', 'ok'))
+        .catch(e => dbg('Netzwerk-Test Supabase: FEHLER – ' + e.message + ' ❌', 'err'));
         dbg('Top-Keys: ' + Object.keys(gn).join(', '), 'info');
         // Social Login prüfen — DAS ist entscheidend
         if (gn.socialLogin) {
@@ -1765,7 +1769,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-M';
+const BUILD_VERSION = 'v2026-02-28-N';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1836,16 +1840,22 @@ function applyParsed(parsed) {
 async function saveToSupabase() {
   if (!_sb || !_currentUserId) return;
   setSyncStatus('saving');
+  let _tid;
+  const timeoutP = new Promise((_, r) => { _tid = setTimeout(() => r(new Error('Save-Timeout')), 8000); });
   try {
-    dbg('DB Save: upsert user_data…', 'info');
-  const { error } = await _sb.from('user_data').upsert(
+    dbg('DB Save: upsert…', 'info');
+    const upsertP = _sb.from('user_data').upsert(
       { user_id: _currentUserId, data: { _v: STATE_VERSION, ...state }, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' }
     );
+    const { error } = await Promise.race([upsertP, timeoutP]);
+    clearTimeout(_tid);
     if (error) throw error;
+    dbg('DB Save: OK', 'ok');
     setSyncStatus('saved');
   } catch(e) {
-    console.warn('Spielr: Supabase save failed', e);
+    clearTimeout(_tid);
+    dbg('DB Save Fehler: ' + e.message, 'err');
     setSyncStatus('error');
   }
 }
@@ -1941,21 +1951,26 @@ function hideAuthLoading() {
 // ── Sicheres Login+Load: Spinner wird IMMER beendet ──
 async function _doLoginAndShow(user) {
   showAuthLoading('Daten laden…');
+  // WICHTIG: _currentUserId ZUERST setzen, damit save() funktioniert
+  _currentUserId = user.id;
   try {
     dbg('Lade Daten für ' + user.email + '…', 'info');
+    // 1. Zuerst lokale Daten laden als Sofort-Fallback
+    const hasLocal = loadLocal();
+    dbg('Lokale Daten: ' + (hasLocal ? 'vorhanden' : 'keine'), 'info');
+    // 2. Supabase versuchen (überschreibt lokale wenn erfolgreich)
     const loaded = await loadFromSupabase(user.id);
-    dbg('Supabase Daten: ' + (loaded ? 'OK' : 'lokal'), loaded ? 'ok' : 'warn');
-    if (!loaded) loadLocal();
+    dbg('Supabase Daten: ' + (loaded ? 'OK' : 'Timeout/Fehler → behalte lokale'), loaded ? 'ok' : 'warn');
+    // 3. Wenn Supabase Daten hat → lokal sichern für nächstes Mal
+    if (loaded) saveLocal();
     showApp(user);
     renderLists();
     showScreen('screen-lists');
     dbg('✅ App bereit: ' + user.email, 'ok');
   } catch(e) {
     dbg('_doLoginAndShow Fehler: ' + e.message, 'err');
-    // Fallback: lokale Daten zeigen
-    try { loadLocal(); showApp(user); renderLists(); showScreen('screen-lists'); } catch(_) {}
+    try { showApp(user); renderLists(); showScreen('screen-lists'); } catch(_) {}
   } finally {
-    // Spinner IMMER beenden — egal was passiert
     hideAuthLoading();
   }
 }
