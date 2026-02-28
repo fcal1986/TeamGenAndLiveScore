@@ -789,16 +789,26 @@
   .auth-loading-text { font-size: 14px; color: var(--text2); font-weight: 600; }
   /* OTP Code Input */
   .otp-wrap {
-    display: flex; gap: 8px; justify-content: center; margin: 16px 0;
+    display: flex; gap: 5px; justify-content: center; margin: 16px 0; flex-wrap: nowrap;
   }
   .otp-digit {
-    width: 44px; height: 54px;
+    width: 36px; height: 50px;
     background: var(--surface2); border: 2px solid var(--border);
-    border-radius: 10px; color: var(--text);
-    font-family: Outfit, sans-serif; font-size: 22px; font-weight: 700;
+    border-radius: 8px; color: var(--text);
+    font-family: Outfit, sans-serif; font-size: 19px; font-weight: 700;
     text-align: center; outline: none; transition: border-color .15s, box-shadow .15s;
-    caret-color: var(--accent);
+    caret-color: var(--accent); min-width: 0;
   }
+  /* Paste-Button */
+  .otp-paste-btn {
+    width: 100%; padding: 11px 16px; margin-top: -4px; margin-bottom: 8px;
+    background: transparent; border: 1.5px dashed var(--border);
+    border-radius: 10px; color: var(--text2);
+    font-family: Outfit, sans-serif; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all .18s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .otp-paste-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,0.05); }
   .otp-digit:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 99,102,241), 0.15);
@@ -993,7 +1003,7 @@
       </div>
 
       <!-- 6 Digit Inputs -->
-      <div class="otp-wrap">
+      <div class="otp-wrap" id="otp-wrap">
         <input class="otp-digit" id="otp-0" type="text" inputmode="numeric"
           maxlength="1" pattern="[0-9]" autocomplete="one-time-code"
           oninput="otpInput(this,0)" onkeydown="otpKeydown(event,0)"
@@ -1013,7 +1023,18 @@
         <input class="otp-digit" id="otp-5" type="text" inputmode="numeric"
           maxlength="1" pattern="[0-9]"
           oninput="otpInput(this,5)" onkeydown="otpKeydown(event,5)" onfocus="this.select()">
+        <input class="otp-digit" id="otp-6" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]"
+          oninput="otpInput(this,6)" onkeydown="otpKeydown(event,6)" onfocus="this.select()">
+        <input class="otp-digit" id="otp-7" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]"
+          oninput="otpInput(this,7)" onkeydown="otpKeydown(event,7)" onfocus="this.select()">
       </div>
+
+      <!-- Paste-Button -->
+      <button class="otp-paste-btn" id="otp-paste-btn" onclick="otpPasteFromClipboard()">
+        📋 Code aus Zwischenablage einfügen
+      </button>
 
       <button class="otp-verify-btn" id="otp-verify-btn" onclick="verifyOtp()" disabled>
         ✓ Anmelden
@@ -1755,7 +1776,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-D';
+const BUILD_VERSION = 'v2026-02-28-E';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2133,13 +2154,13 @@ function otpInput(el, idx) {
   el.classList.toggle('filled', el.value !== '');
   el.classList.remove('error');
   const all = _getOtpValue();
-  if (all.length === 6) {
+  if (all.length === OTP_LEN) {
     document.getElementById('otp-verify-btn').disabled = false;
     verifyOtp();
     return;
   }
-  if (el.value && idx < 5) document.getElementById('otp-' + (idx+1)).focus();
-  document.getElementById('otp-verify-btn').disabled = all.length < 6;
+  if (el.value && idx < OTP_LEN - 1) document.getElementById('otp-' + (idx+1)).focus();
+  document.getElementById('otp-verify-btn').disabled = all.length < OTP_LEN;
 }
 
 function otpKeydown(event, idx) {
@@ -2157,31 +2178,67 @@ function otpKeydown(event, idx) {
 function otpPaste(event) {
   event.preventDefault();
   const text = (event.clipboardData || window.clipboardData).getData('text');
-  const digits = text.replace(/[^0-9]/g, '').slice(0, 6);
-  if (!digits) return;
-  for (let i = 0; i < 6; i++) {
+  _fillOtpFromString(text);
+}
+
+async function otpPasteFromClipboard() {
+  const pasteBtn = document.getElementById('otp-paste-btn');
+  try {
+    let text = '';
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      text = await navigator.clipboard.readText();
+    } else {
+      const d = document.getElementById('otp-0');
+      if (d) { d.focus(); d.select(); }
+      showOtpError('Bitte Code manuell einfügen (langes Drücken → Einfügen)');
+      return;
+    }
+    if (_fillOtpFromString(text)) {
+      if (pasteBtn) {
+        pasteBtn.textContent = '✅ Eingefügt!';
+        setTimeout(() => { pasteBtn.innerHTML = '📋 Code aus Zwischenablage einfügen'; }, 2000);
+      }
+    } else {
+      showOtpError('Kein gültiger Code in der Zwischenablage.');
+    }
+  } catch(e) {
+    const d = document.getElementById('otp-0');
+    if (d) { d.focus(); d.select(); }
+    showOtpError('Bitte Code manuell einfügen (langes Drücken → Einfügen)');
+  }
+}
+
+function _fillOtpFromString(text) {
+  const digits = text.replace(/[^0-9]/g, '').slice(0, OTP_LEN);
+  if (!digits) return false;
+  for (let i = 0; i < OTP_LEN; i++) {
     const d = document.getElementById('otp-' + i);
     if (d) { d.value = digits[i] || ''; d.classList.toggle('filled', !!digits[i]); }
   }
-  const last = Math.min(5, digits.length - 1);
+  const last = Math.min(OTP_LEN - 1, digits.length - 1);
   const focus = document.getElementById('otp-' + last);
   if (focus) focus.focus();
-  document.getElementById('otp-verify-btn').disabled = digits.length < 6;
-  if (digits.length === 6) setTimeout(verifyOtp, 100);
+  document.getElementById('otp-verify-btn').disabled = digits.length < OTP_LEN;
+  if (digits.length >= OTP_LEN) setTimeout(verifyOtp, 100);
+  return true;
 }
 
 function _getOtpValue() {
-  return [0,1,2,3,4,5].map(i => {
+  let v = '';
+  for (let i = 0; i < OTP_LEN; i++) {
     const el = document.getElementById('otp-' + i);
-    return el ? el.value : '';
-  }).join('');
+    v += el ? el.value : '';
+  }
+  return v;
 }
 
+const OTP_LEN = 8; // Supabase sendet 8-stellige Codes (konfigurierbar im Dashboard)
+
 function _clearOtpInputs() {
-  [0,1,2,3,4,5].forEach(i => {
+  for (let i = 0; i < OTP_LEN; i++) {
     const d = document.getElementById('otp-' + i);
     if (d) { d.value = ''; d.disabled = false; d.classList.remove('filled','error'); }
-  });
+  }
   const vBtn = document.getElementById('otp-verify-btn');
   if (vBtn) { vBtn.disabled = true; vBtn.textContent = '✓ Anmelden'; }
 }
@@ -2189,14 +2246,12 @@ function _clearOtpInputs() {
 // ── Schritt 2: OTP verifizieren ──
 async function verifyOtp() {
   const token = _getOtpValue();
-  if (token.length < 6) return;
+  if (token.length < OTP_LEN) return;
 
   const btn = document.getElementById('otp-verify-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Prüfe…'; }
   hideOtpError();
-  [0,1,2,3,4,5].forEach(i => {
-    const d = document.getElementById('otp-' + i); if (d) d.disabled = true;
-  });
+  for (let i = 0; i < OTP_LEN; i++) { const d = document.getElementById('otp-' + i); if (d) d.disabled = true; }
 
   try {
     const { data, error } = await _sb.auth.verifyOtp({
@@ -2219,7 +2274,7 @@ async function verifyOtp() {
 
   } catch(e) {
     showOtpError('Netzwerkfehler: ' + e.message);
-    [0,1,2,3,4,5].forEach(i => { const d = document.getElementById('otp-' + i); if(d) d.disabled = false; });
+    for (let i = 0; i < OTP_LEN; i++) { const d = document.getElementById('otp-' + i); if(d) d.disabled = false; }
     if (btn) { btn.disabled = false; btn.textContent = '✓ Anmelden'; }
   }
 }
