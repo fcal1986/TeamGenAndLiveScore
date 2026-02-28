@@ -1775,7 +1775,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-I';
+const BUILD_VERSION = 'v2026-02-28-J';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1858,13 +1858,20 @@ async function saveToSupabase() {
 
 async function loadFromSupabase(userId) {
   if (!_sb) return false;
+  // Timeout-Wrapper: nach 8s bricht ab → App zeigt lokale Daten
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Timeout')), 8000)
+  );
   try {
-    const { data, error } = await _sb.from('user_data')
-      .select('data').eq('user_id', userId).single();
+    const result = await Promise.race([
+      _sb.from('user_data').select('data').eq('user_id', userId).single(),
+      timeout
+    ]);
+    const { data, error } = result;
     if (error || !data) return false;
     return applyParsed(data.data);
   } catch(e) {
-    console.warn('Spielr: Supabase load failed', e);
+    dbg('loadFromSupabase: ' + e.message + ' → lokale Daten', 'warn');
     return false;
   }
 }
@@ -1924,6 +1931,28 @@ function hideAuthLoading() {
   if (el) el.classList.remove('show');
 }
 
+// ── Sicheres Login+Load: Spinner wird IMMER beendet ──
+async function _doLoginAndShow(user) {
+  showAuthLoading('Daten laden…');
+  try {
+    dbg('Lade Daten für ' + user.email + '…', 'info');
+    const loaded = await loadFromSupabase(user.id);
+    dbg('Supabase Daten: ' + (loaded ? 'OK' : 'lokal'), loaded ? 'ok' : 'warn');
+    if (!loaded) loadLocal();
+    showApp(user);
+    renderLists();
+    showScreen('screen-lists');
+    dbg('✅ App bereit: ' + user.email, 'ok');
+  } catch(e) {
+    dbg('_doLoginAndShow Fehler: ' + e.message, 'err');
+    // Fallback: lokale Daten zeigen
+    try { loadLocal(); showApp(user); renderLists(); showScreen('screen-lists'); } catch(_) {}
+  } finally {
+    // Spinner IMMER beenden — egal was passiert
+    hideAuthLoading();
+  }
+}
+
 // ── Show / Hide screens ──
 function showAuthScreen() {
   document.getElementById('screen-auth').style.display = 'flex';
@@ -1950,6 +1979,7 @@ function showAuthScreen() {
 }
 
 function showApp(user) {
+  dbg('showApp: ' + user.email, 'info');
   _currentUserId = user.id;
   document.getElementById('screen-auth').style.display = 'none';
   hideAuthLoading();
@@ -2391,15 +2421,7 @@ async function initApp() {
         dbg('→ Login → lade App für ' + session.user.email, 'ok');
         _lastLoginTime = Date.now();
         _authInitDone = true;
-        showAuthLoading('Daten laden…');
-        const loaded = await loadFromSupabase(session.user.id);
-        dbg('Supabase Daten: ' + loaded, loaded ? 'ok' : 'warn');
-        if (!loaded) loadLocal();
-        showApp(session.user);
-        renderLists();
-        showScreen('screen-lists');
-        hideAuthLoading();
-        dbg('✅ Eingeloggt als: ' + session.user.email, 'ok');
+        await _doLoginAndShow(session.user);
       } else if (_currentUserId && _currentUserId === session.user.id) {
         // ── Echter Token-Refresh für bereits eingeloggten User ──
         dbg('→ Token-Refresh für ' + session.user.email, 'info');
@@ -2408,13 +2430,7 @@ async function initApp() {
         // ── User-Wechsel (unwahrscheinlich aber möglich) ──
         dbg('→ User-Wechsel → App neu laden', 'warn');
         _authInitDone = true;
-        showAuthLoading('Daten laden…');
-        const loaded = await loadFromSupabase(session.user.id);
-        if (!loaded) loadLocal();
-        showApp(session.user);
-        renderLists();
-        showScreen('screen-lists');
-        hideAuthLoading();
+        await _doLoginAndShow(session.user);
       }
       // else: _authInitDone=true aber _currentUserId=null → login nach signOut,
       // auch als neuer Login behandeln — oben durch !_authInitDone abgedeckt nach SIGNED_OUT reset
@@ -2463,14 +2479,7 @@ async function initApp() {
     // Bestehende Session beim App-Neustart
     dbg('→ Bestehende Session → lade App', 'ok');
     _authInitDone = true;
-    showAuthLoading('Daten laden…');
-    const loaded = await loadFromSupabase(initialSession.user.id);
-    dbg('Supabase Daten: ' + loaded, loaded ? 'ok' : 'warn');
-    if (!loaded) loadLocal();
-    showApp(initialSession.user);
-    renderLists();
-    showScreen('screen-lists');
-    hideAuthLoading();
+    await _doLoginAndShow(initialSession.user);
     dbg('✅ Session wiederhergestellt: ' + initialSession.user.email, 'ok');
   } else if (!initialSession && !_sessionChecked && !_authInitDone) {
     // getSession meldet keine Session, INITIAL_SESSION hat noch nicht gefeuert
@@ -2483,6 +2492,22 @@ async function initApp() {
     dbg('→ onAuthStateChange hat bereits eingeloggt', 'info');
   }
 }
+
+// Globaler Fehler-Handler: sicherstellen dass Spinner nie ewig hängt
+window.addEventListener('unhandledrejection', (e) => {
+  dbg('Unhandled Promise Rejection: ' + (e.reason?.message || e.reason), 'err');
+  // Falls Loading-Spinner aktiv → beenden und Auth-Screen zeigen
+  const loading = document.getElementById('auth-loading');
+  if (loading && loading.classList.contains('show')) {
+    dbg('→ Spinner-Fallback: zeige Login-Screen', 'warn');
+    hideAuthLoading();
+    if (!_currentUserId) showAuthScreen();
+  }
+});
+
+window.addEventListener('error', (e) => {
+  dbg('JS ERROR: ' + e.message + ' @ ' + e.filename + ':' + e.lineno, 'err');
+});
 
 initApp();
 
