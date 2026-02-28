@@ -1826,8 +1826,26 @@ function hideAuthLoading() {
 // ── Show / Hide screens ──
 function showAuthScreen() {
   document.getElementById('screen-auth').style.display = 'flex';
-  const btn = document.getElementById('user-avatar-btn');
-  if (btn) btn.style.display = 'none';
+  // Avatar ausblenden
+  const avatarBtn = document.getElementById('user-avatar-btn');
+  if (avatarBtn) avatarBtn.style.display = 'none';
+  // Google-Button vollständig zurücksetzen
+  const googleBtn = document.getElementById('auth-google-btn');
+  if (googleBtn) { googleBtn.disabled = false; googleBtn.innerHTML = googleBtnInner(); }
+  // Plugin-Hinweis ausblenden
+  const hint = document.getElementById('auth-google-plugin-hint');
+  if (hint) hint.style.display = 'none';
+  // Magic-Link-Form zurücksetzen
+  const authForm = document.getElementById('auth-form');
+  if (authForm) authForm.style.display = 'block';
+  const authSent = document.getElementById('auth-sent');
+  if (authSent) authSent.style.display = 'none';
+  hideAuthError();
+  const magicBtn = document.getElementById('auth-magic-btn');
+  if (magicBtn && !(_magicCooldownEnd > Date.now())) {
+    magicBtn.disabled = false;
+    magicBtn.textContent = '✉️ Magic Link senden';
+  }
 }
 
 function showApp(user) {
