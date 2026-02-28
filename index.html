@@ -1765,22 +1765,14 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-L';
+const BUILD_VERSION = 'v2026-02-28-M';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
 // Supabase client – null wenn Platzhalter noch nicht ersetzt
-// Supabase Client mit 6s fetch-Timeout (verhindert hängende Queries)
-const _sbFetch = (url, options = {}) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
-  return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
-};
-
+// Standard Supabase Client — kein fetch-Override (WebView-kompatibel)
 const _sb = (SUPABASE_URL && !SUPABASE_URL.startsWith('%%'))
   ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { fetch: _sbFetch },
       auth: { persistSession: true, autoRefreshToken: true }
     })
   : null;
@@ -1859,31 +1851,34 @@ async function saveToSupabase() {
 }
 
 async function loadFromSupabase(userId) {
-  if (!_sb) { dbg('loadFromSupabase: kein _sb Client', 'err'); return false; }
-  dbg('DB Query: user_data für ' + userId.substring(0,8) + '…', 'info');
+  if (!_sb) { dbg('DB: kein Client', 'err'); return false; }
+  dbg('DB Query start: ' + userId.substring(0,8) + '…', 'info');
+
+  // Timeout via Promise.race — KEIN AbortController (WebView-inkompatibel)
+  let _timeoutId;
+  const timeoutP = new Promise((_, reject) => {
+    _timeoutId = setTimeout(() => reject(new Error('DB-Timeout 10s')), 10000);
+  });
+
   try {
-    // maybeSingle() statt single() — gibt null zurück wenn kein Row (kein Error)
-    // _sbFetch hat bereits 6s Timeout → kein extra Promise.race nötig
-    const { data, error, status } = await _sb
+    const queryP = _sb
       .from('user_data')
       .select('data')
       .eq('user_id', userId)
       .maybeSingle();
 
-    dbg('DB Response: status=' + status + ' data=' + (data ? 'ja' : 'null') + (error ? ' err=' + error.message : ''), status === 200 || status === 406 ? 'ok' : 'warn');
+    const { data, error, status } = await Promise.race([queryP, timeoutP]);
+    clearTimeout(_timeoutId);
 
-    if (error) {
-      dbg('DB Fehler: ' + error.message + ' (code: ' + error.code + ')', 'err');
-      return false;
-    }
-    if (!data) {
-      dbg('DB: Kein Datensatz für diesen User → lokale Daten', 'warn');
-      return false;
-    }
-    dbg('DB: Daten geladen (' + JSON.stringify(data.data).length + ' bytes)', 'ok');
+    dbg('DB Response: status=' + status + ' data=' + (data ? 'ja' : 'null') + (error ? ' err=' + error.message : ''), 'ok');
+
+    if (error) { dbg('DB Fehler: ' + error.code + ' – ' + error.message, 'err'); return false; }
+    if (!data)  { dbg('DB: Kein Row → lokale Daten', 'warn'); return false; }
+    dbg('DB: ' + JSON.stringify(data.data).length + ' bytes geladen', 'ok');
     return applyParsed(data.data);
   } catch(e) {
-    dbg('DB Exception: ' + e.message + (e.name === 'AbortError' ? ' (fetch aborted/timeout)' : ''), 'err');
+    clearTimeout(_timeoutId);
+    dbg('DB Exception: ' + e.message, 'err');
     return false;
   }
 }
