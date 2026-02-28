@@ -1769,7 +1769,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-O';
+const BUILD_VERSION = 'v2026-02-28-P';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1802,6 +1802,7 @@ const STATE_VERSION = 2;
 // ║  PERSIST  (localStorage + Supabase)                  ║
 // ╚══════════════════════════════════════════════════════╝
 let _currentUserId = null;
+let _currentToken = null;   // Auth-Token direkt aus onAuthStateChange
 let _saveDebounceTimer = null;
 
 function saveLocal() {
@@ -1854,17 +1855,17 @@ async function _sbRestFetch(method, path, body, token) {
   return res.status === 204 ? null : res.json().catch(() => null);
 }
 
-async function _getToken() {
-  const { data: { session } } = await _sb.auth.getSession();
-  return session?.access_token || null;
+function _getToken() {
+  // Token kommt direkt aus onAuthStateChange — kein async getSession() nötig
+  return _currentToken;
 }
 
 async function saveToSupabase() {
   if (!_sb || !_currentUserId) return;
   setSyncStatus('saving');
   try {
-    const token = await _getToken();
-    if (!token) { dbg('DB Save: kein Token', 'err'); setSyncStatus('error'); return; }
+    const token = _getToken();
+    if (!token) { dbg('DB Save: kein Token → lokale Daten bleiben', 'warn'); setSyncStatus('error'); return; }
     dbg('DB Save: upsert via REST…', 'info');
     await _sbRestFetch('POST', 'user_data', {
       user_id: _currentUserId,
@@ -1883,8 +1884,8 @@ async function loadFromSupabase(userId) {
   if (!_sb) { dbg('DB: kein Client', 'err'); return false; }
   dbg('DB Load: REST fetch für ' + userId.substring(0,8) + '…', 'info');
   try {
-    const token = await _getToken();
-    if (!token) { dbg('DB Load: kein Token', 'err'); return false; }
+    const token = _getToken();
+    if (!token) { dbg('DB Load: kein Token → lokale Daten', 'warn'); return false; }
     dbg('DB Load: Token OK, sende Query…', 'info');
     const rows = await _sbRestFetch(
       'GET',
@@ -1959,10 +1960,11 @@ function hideAuthLoading() {
 }
 
 // ── Sicheres Login+Load: Spinner wird IMMER beendet ──
-async function _doLoginAndShow(user) {
+async function _doLoginAndShow(user, token) {
   showAuthLoading('Daten laden…');
-  // WICHTIG: _currentUserId ZUERST setzen, damit save() funktioniert
+  // WICHTIG: UserId + Token ZUERST setzen
   _currentUserId = user.id;
+  _currentToken  = token;
   try {
     dbg('Lade Daten für ' + user.email + '…', 'info');
     // 1. Zuerst lokale Daten laden als Sofort-Fallback
@@ -2453,16 +2455,17 @@ async function initApp() {
         dbg('→ Login → lade App für ' + session.user.email, 'ok');
         _lastLoginTime = Date.now();
         _authInitDone = true;
-        await _doLoginAndShow(session.user);
+        await _doLoginAndShow(session.user, session.access_token);
       } else if (_currentUserId && _currentUserId === session.user.id) {
         // ── Echter Token-Refresh für bereits eingeloggten User ──
         dbg('→ Token-Refresh für ' + session.user.email, 'info');
         _currentUserId = session.user.id;
+        _currentToken  = session.access_token;  // Token aktuell halten
       } else if (_currentUserId && _currentUserId !== session.user.id) {
         // ── User-Wechsel (unwahrscheinlich aber möglich) ──
         dbg('→ User-Wechsel → App neu laden', 'warn');
         _authInitDone = true;
-        await _doLoginAndShow(session.user);
+        await _doLoginAndShow(session.user, session.access_token);
       }
       // else: _authInitDone=true aber _currentUserId=null → login nach signOut,
       // auch als neuer Login behandeln — oben durch !_authInitDone abgedeckt nach SIGNED_OUT reset
@@ -2484,6 +2487,7 @@ async function initApp() {
       _authInitDone = false;
       _sessionChecked = false;
       _currentUserId = null;
+      _currentToken  = null;
       _lastLoginTime = null;
       hideAuthLoading();
       showAuthScreen();
@@ -2511,7 +2515,7 @@ async function initApp() {
     // Bestehende Session beim App-Neustart
     dbg('→ Bestehende Session → lade App', 'ok');
     _authInitDone = true;
-    await _doLoginAndShow(initialSession.user);
+    await _doLoginAndShow(initialSession.user, initialSession.access_token);
     dbg('✅ Session wiederhergestellt: ' + initialSession.user.email, 'ok');
   } else if (!initialSession && !_sessionChecked && !_authInitDone) {
     // getSession meldet keine Session, INITIAL_SESSION hat noch nicht gefeuert
