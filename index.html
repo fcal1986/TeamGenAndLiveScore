@@ -1769,7 +1769,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-N';
+const BUILD_VERSION = 'v2026-02-28-O';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1837,24 +1837,43 @@ function applyParsed(parsed) {
   return true;
 }
 
+// ── Direkter REST-fetch zu Supabase (WebView-sicher) ──
+async function _sbRestFetch(method, path, body, token) {
+  const url = SUPABASE_URL + '/rest/v1/' + path;
+  const headers = {
+    'apikey': SUPABASE_ANON,
+    'Authorization': 'Bearer ' + token,
+    'Content-Type': 'application/json',
+    'Prefer': method === 'POST' ? 'resolution=merge-duplicates,return=minimal' : ''
+  };
+  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error('HTTP ' + res.status + ' ' + txt.substring(0, 100));
+  }
+  return res.status === 204 ? null : res.json().catch(() => null);
+}
+
+async function _getToken() {
+  const { data: { session } } = await _sb.auth.getSession();
+  return session?.access_token || null;
+}
+
 async function saveToSupabase() {
   if (!_sb || !_currentUserId) return;
   setSyncStatus('saving');
-  let _tid;
-  const timeoutP = new Promise((_, r) => { _tid = setTimeout(() => r(new Error('Save-Timeout')), 8000); });
   try {
-    dbg('DB Save: upsert…', 'info');
-    const upsertP = _sb.from('user_data').upsert(
-      { user_id: _currentUserId, data: { _v: STATE_VERSION, ...state }, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id' }
-    );
-    const { error } = await Promise.race([upsertP, timeoutP]);
-    clearTimeout(_tid);
-    if (error) throw error;
-    dbg('DB Save: OK', 'ok');
+    const token = await _getToken();
+    if (!token) { dbg('DB Save: kein Token', 'err'); setSyncStatus('error'); return; }
+    dbg('DB Save: upsert via REST…', 'info');
+    await _sbRestFetch('POST', 'user_data', {
+      user_id: _currentUserId,
+      data: { _v: STATE_VERSION, ...state },
+      updated_at: new Date().toISOString()
+    }, token);
+    dbg('DB Save: OK ✅', 'ok');
     setSyncStatus('saved');
   } catch(e) {
-    clearTimeout(_tid);
     dbg('DB Save Fehler: ' + e.message, 'err');
     setSyncStatus('error');
   }
@@ -1862,33 +1881,24 @@ async function saveToSupabase() {
 
 async function loadFromSupabase(userId) {
   if (!_sb) { dbg('DB: kein Client', 'err'); return false; }
-  dbg('DB Query start: ' + userId.substring(0,8) + '…', 'info');
-
-  // Timeout via Promise.race — KEIN AbortController (WebView-inkompatibel)
-  let _timeoutId;
-  const timeoutP = new Promise((_, reject) => {
-    _timeoutId = setTimeout(() => reject(new Error('DB-Timeout 10s')), 10000);
-  });
-
+  dbg('DB Load: REST fetch für ' + userId.substring(0,8) + '…', 'info');
   try {
-    const queryP = _sb
-      .from('user_data')
-      .select('data')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    const { data, error, status } = await Promise.race([queryP, timeoutP]);
-    clearTimeout(_timeoutId);
-
-    dbg('DB Response: status=' + status + ' data=' + (data ? 'ja' : 'null') + (error ? ' err=' + error.message : ''), 'ok');
-
-    if (error) { dbg('DB Fehler: ' + error.code + ' – ' + error.message, 'err'); return false; }
-    if (!data)  { dbg('DB: Kein Row → lokale Daten', 'warn'); return false; }
-    dbg('DB: ' + JSON.stringify(data.data).length + ' bytes geladen', 'ok');
-    return applyParsed(data.data);
+    const token = await _getToken();
+    if (!token) { dbg('DB Load: kein Token', 'err'); return false; }
+    dbg('DB Load: Token OK, sende Query…', 'info');
+    const rows = await _sbRestFetch(
+      'GET',
+      'user_data?select=data&user_id=eq.' + encodeURIComponent(userId) + '&limit=1',
+      null,
+      token
+    );
+    dbg('DB Load: ' + (rows ? rows.length + ' rows' : 'null'), 'ok');
+    if (!rows || rows.length === 0) { dbg('DB: Kein Row → lokale Daten', 'warn'); return false; }
+    const bytes = JSON.stringify(rows[0].data).length;
+    dbg('DB: ' + bytes + ' bytes geladen ✅', 'ok');
+    return applyParsed(rows[0].data);
   } catch(e) {
-    clearTimeout(_timeoutId);
-    dbg('DB Exception: ' + e.message, 'err');
+    dbg('DB Load Fehler: ' + e.message, 'err');
     return false;
   }
 }
