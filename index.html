@@ -787,6 +787,51 @@
     to   { opacity: 1; transform: translateY(0); }
   }
   .auth-loading-text { font-size: 14px; color: var(--text2); font-weight: 600; }
+  /* OTP Code Input */
+  .otp-wrap {
+    display: flex; gap: 8px; justify-content: center; margin: 16px 0;
+  }
+  .otp-digit {
+    width: 44px; height: 54px;
+    background: var(--surface2); border: 2px solid var(--border);
+    border-radius: 10px; color: var(--text);
+    font-family: Outfit, sans-serif; font-size: 22px; font-weight: 700;
+    text-align: center; outline: none; transition: border-color .15s, box-shadow .15s;
+    caret-color: var(--accent);
+  }
+  .otp-digit:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 99,102,241), 0.15);
+  }
+  .otp-digit.filled { border-color: var(--accent3); }
+  .otp-digit.error  { border-color: #ef4444; animation: otpShake .3s; }
+  @keyframes otpShake {
+    0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)}
+  }
+  .otp-verify-btn {
+    width: 100%; padding: 14px 20px;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 10px;
+    font-family: Outfit, sans-serif; font-size: 15px; font-weight: 700;
+    cursor: pointer; transition: all .18s; margin-top: 4px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .otp-verify-btn:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+  .otp-verify-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .otp-resend {
+    text-align: center; font-size: 12px; color: var(--text3);
+    margin-top: 12px; line-height: 1.8;
+  }
+  .otp-resend button {
+    background: none; border: none; color: var(--accent);
+    font-size: 12px; font-family: Outfit, sans-serif;
+    cursor: pointer; text-decoration: underline; padding: 0;
+  }
+  .otp-resend button:disabled { color: var(--text3); text-decoration: none; cursor: default; }
+  .otp-email-display {
+    text-align: center; font-size: 13px; color: var(--text2);
+    margin-bottom: 4px; font-weight: 600;
+  }
   /* ══ DEBUG PANEL ══ */
   #debug-panel {
     display: none;
@@ -906,10 +951,10 @@
       <div class="auth-logo-sub">Teams, Turniere &amp; Abstimmungen<br>für deine Gruppe</div>
     </div>
 
-    <!-- ① Main form (Google + Magic Link) -->
+    <!-- ① E-Mail eingeben -->
     <div id="auth-form">
 
-      <!-- Google Button: Median → native SDK | Browser → OAuth -->
+      <!-- Google Button -->
       <button class="auth-google-btn" id="auth-google-btn" onclick="signInWithGoogle()">
         <svg class="auth-google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -920,41 +965,75 @@
         Mit Google anmelden
       </button>
 
-      <!-- Median Social Login Plugin nicht aktiv → Hinweis -->
       <div id="auth-google-plugin-hint" style="display:none;margin-top:-8px;margin-bottom:12px;
         background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);
         border-radius:8px;padding:10px 12px;font-size:12px;color:#fbbf24;text-align:center;line-height:1.5">
-        ⚠️ Median Social Login Plugin nicht aktiviert.<br>
-        Google Login nur im Browser verfügbar.
+        ⚠️ Median Social Login Plugin nicht aktiviert.
       </div>
 
-      <!-- Divider -->
       <div class="auth-divider">oder per E-Mail</div>
 
-      <!-- Magic Link -->
       <input class="auth-email-input" id="auth-email" type="email"
         placeholder="deine@email.de" autocomplete="email"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();sendMagicLink()}">
-      <button class="auth-magic-btn" id="auth-magic-btn" onclick="sendMagicLink()">
-        ✉️ Magic Link senden
+        onkeydown="if(event.key==='Enter'){event.preventDefault();sendOtp()}">
+      <button class="auth-magic-btn" id="auth-otp-send-btn" onclick="sendOtp()">
+        ✉️ Code per E-Mail senden
       </button>
 
-      <!-- Error -->
       <div class="auth-error-box" id="auth-error"></div>
     </div>
 
-    <!-- ② Sent confirmation -->
-    <div class="auth-sent-box" id="auth-sent">
-      <div class="auth-sent-icon">📬</div>
-      <div class="auth-sent-title">Link verschickt!</div>
-      <div class="auth-sent-sub">
-        Schau in dein Postfach und klicke<br>auf den Anmelde-Link.
-        <br><br>
-        <span id="auth-cooldown-msg" style="color:var(--accent3);font-weight:600"></span>
+    <!-- ② OTP eingeben -->
+    <div id="auth-otp-form" style="display:none;animation:authFadeIn .3s ease">
+      <div class="auth-sent-icon" style="font-size:36px;text-align:center;margin-bottom:8px">📬</div>
+      <div class="auth-sent-title" style="font-size:17px;text-align:center;margin-bottom:4px">Code eingeben</div>
+      <div class="otp-email-display" id="otp-email-display"></div>
+      <div style="text-align:center;font-size:12px;color:var(--text3);margin-bottom:16px">
+        6-stelliger Code · gültig 10 Minuten
       </div>
-      <button class="auth-magic-btn" onclick="resetAuthForm()" style="margin-top:4px">
-        Andere E-Mail versuchen
+
+      <!-- 6 Digit Inputs -->
+      <div class="otp-wrap">
+        <input class="otp-digit" id="otp-0" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]" autocomplete="one-time-code"
+          oninput="otpInput(this,0)" onkeydown="otpKeydown(event,0)" onfocus="this.select()">
+        <input class="otp-digit" id="otp-1" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]"
+          oninput="otpInput(this,1)" onkeydown="otpKeydown(event,1)" onfocus="this.select()">
+        <input class="otp-digit" id="otp-2" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]"
+          oninput="otpInput(this,2)" onkeydown="otpKeydown(event,2)" onfocus="this.select()">
+        <input class="otp-digit" id="otp-3" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]"
+          oninput="otpInput(this,3)" onkeydown="otpKeydown(event,3)" onfocus="this.select()">
+        <input class="otp-digit" id="otp-4" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]"
+          oninput="otpInput(this,4)" onkeydown="otpKeydown(event,4)" onfocus="this.select()">
+        <input class="otp-digit" id="otp-5" type="text" inputmode="numeric"
+          maxlength="1" pattern="[0-9]"
+          oninput="otpInput(this,5)" onkeydown="otpKeydown(event,5)" onfocus="this.select()">
+      </div>
+
+      <button class="otp-verify-btn" id="otp-verify-btn" onclick="verifyOtp()" disabled>
+        ✓ Anmelden
       </button>
+
+      <div class="otp-resend">
+        <span id="otp-resend-msg">Keinen Code erhalten?</span><br>
+        <button id="otp-resend-btn" onclick="resendOtp()" disabled>
+          Neuen Code senden (<span id="otp-countdown">60</span>s)
+        </button>
+      </div>
+
+      <div class="auth-error-box" id="auth-error-otp"></div>
+
+      <div style="text-align:center;margin-top:12px">
+        <button onclick="resetAuthForm()" style="background:none;border:none;
+          color:var(--text3);font-size:12px;font-family:Outfit,sans-serif;
+          cursor:pointer;text-decoration:underline">
+          Andere E-Mail verwenden
+        </button>
+      </div>
     </div>
 
     <div class="auth-hint">Kein Passwort nötig · Deine Daten sind sicher</div>
@@ -1675,7 +1754,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-B';
+const BUILD_VERSION = 'v2026-02-28-C-OTP';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1836,17 +1915,17 @@ function showAuthScreen() {
   // Plugin-Hinweis ausblenden
   const hint = document.getElementById('auth-google-plugin-hint');
   if (hint) hint.style.display = 'none';
-  // Magic-Link-Form zurücksetzen
+  // Formulare zurücksetzen
   const authForm = document.getElementById('auth-form');
   if (authForm) authForm.style.display = 'block';
-  const authSent = document.getElementById('auth-sent');
-  if (authSent) authSent.style.display = 'none';
+  const otpForm = document.getElementById('auth-otp-form');
+  if (otpForm) otpForm.style.display = 'none';
+  if (typeof _clearOtpInputs === 'function') _clearOtpInputs();
+  _otpEmail = '';
   hideAuthError();
-  const magicBtn = document.getElementById('auth-magic-btn');
-  if (magicBtn && !(_magicCooldownEnd > Date.now())) {
-    magicBtn.disabled = false;
-    magicBtn.textContent = '✉️ Magic Link senden';
-  }
+  if (typeof hideOtpError === 'function') hideOtpError();
+  const sendBtn = document.getElementById('auth-otp-send-btn');
+  if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '✉️ Code per E-Mail senden'; }
 }
 
 function showApp(user) {
@@ -2112,22 +2191,23 @@ function hideAuthError() {
 }
 
 function resetAuthForm() {
+  // OTP-Form ausblenden, E-Mail-Form zeigen
   document.getElementById('auth-form').style.display = 'block';
-  document.getElementById('auth-sent').style.display = 'none';
+  const otpForm = document.getElementById('auth-otp-form');
+  if (otpForm) otpForm.style.display = 'none';
+  // OTP-Felder leeren
+  _clearOtpInputs && _clearOtpInputs();
+  _otpEmail = '';
+  // Countdown stoppen
+  if (_otpCountdown) { clearInterval(_otpCountdown); _otpCountdown = null; }
   hideAuthError();
-  const btn = document.getElementById('auth-magic-btn');
-  const remaining = Math.ceil((_magicCooldownEnd - Date.now()) / 1000);
-  if (btn) {
-    if (remaining > 0) {
-      btn.disabled = true;
-      btn.textContent = 'Warte ' + remaining + 's…';
-    } else {
-      btn.disabled = false;
-      btn.textContent = '✉️ Magic Link senden';
-    }
-  }
+  hideOtpError && hideOtpError();
+  // E-Mail-Feld leeren + fokussieren
   const inp = document.getElementById('auth-email');
   if (inp) { inp.value = ''; inp.focus(); }
+  // Send-Button zurücksetzen
+  const btn = document.getElementById('auth-otp-send-btn');
+  if (btn) { btn.disabled = false; btn.textContent = '✉️ Code per E-Mail senden'; }
 }
 
 // ── User Menu ──
