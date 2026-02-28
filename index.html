@@ -17,17 +17,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
 <!-- PWA Manifest -->
 <link rel="manifest" href="manifest.json">
-<meta http-equiv="Content-Security-Policy" content="
-  default-src 'self';
-  script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com 'wasm-unsafe-eval';
-  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com;
-  font-src 'self' https://fonts.gstatic.com;
-  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://fcal1986.github.io;
-  img-src 'self' data: blob: https://*.googleusercontent.com;
-  frame-src 'none';
-  object-src 'none';
-  base-uri 'self';
-">
+<!-- CSP via Server-Header empfohlen, nicht via Meta-Tag in WebView -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -1775,13 +1765,24 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-J';
+const BUILD_VERSION = 'v2026-02-28-L';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
 // Supabase client – null wenn Platzhalter noch nicht ersetzt
+// Supabase Client mit 6s fetch-Timeout (verhindert hängende Queries)
+const _sbFetch = (url, options = {}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+};
+
 const _sb = (SUPABASE_URL && !SUPABASE_URL.startsWith('%%'))
-  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON)
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+      global: { fetch: _sbFetch },
+      auth: { persistSession: true, autoRefreshToken: true }
+    })
   : null;
 
 // ╔══════════════════════════════════════════════════════╗
@@ -1844,7 +1845,8 @@ async function saveToSupabase() {
   if (!_sb || !_currentUserId) return;
   setSyncStatus('saving');
   try {
-    const { error } = await _sb.from('user_data').upsert(
+    dbg('DB Save: upsert user_data…', 'info');
+  const { error } = await _sb.from('user_data').upsert(
       { user_id: _currentUserId, data: { _v: STATE_VERSION, ...state }, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' }
     );
@@ -1857,21 +1859,31 @@ async function saveToSupabase() {
 }
 
 async function loadFromSupabase(userId) {
-  if (!_sb) return false;
-  // Timeout-Wrapper: nach 8s bricht ab → App zeigt lokale Daten
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Timeout')), 8000)
-  );
+  if (!_sb) { dbg('loadFromSupabase: kein _sb Client', 'err'); return false; }
+  dbg('DB Query: user_data für ' + userId.substring(0,8) + '…', 'info');
   try {
-    const result = await Promise.race([
-      _sb.from('user_data').select('data').eq('user_id', userId).single(),
-      timeout
-    ]);
-    const { data, error } = result;
-    if (error || !data) return false;
+    // maybeSingle() statt single() — gibt null zurück wenn kein Row (kein Error)
+    // _sbFetch hat bereits 6s Timeout → kein extra Promise.race nötig
+    const { data, error, status } = await _sb
+      .from('user_data')
+      .select('data')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    dbg('DB Response: status=' + status + ' data=' + (data ? 'ja' : 'null') + (error ? ' err=' + error.message : ''), status === 200 || status === 406 ? 'ok' : 'warn');
+
+    if (error) {
+      dbg('DB Fehler: ' + error.message + ' (code: ' + error.code + ')', 'err');
+      return false;
+    }
+    if (!data) {
+      dbg('DB: Kein Datensatz für diesen User → lokale Daten', 'warn');
+      return false;
+    }
+    dbg('DB: Daten geladen (' + JSON.stringify(data.data).length + ' bytes)', 'ok');
     return applyParsed(data.data);
   } catch(e) {
-    dbg('loadFromSupabase: ' + e.message + ' → lokale Daten', 'warn');
+    dbg('DB Exception: ' + e.message + (e.name === 'AbortError' ? ' (fetch aborted/timeout)' : ''), 'err');
     return false;
   }
 }
