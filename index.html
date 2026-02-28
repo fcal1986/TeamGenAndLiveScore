@@ -1675,6 +1675,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
+const BUILD_VERSION = 'v2026-02-28-B';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1918,18 +1919,30 @@ async function signInWithGoogle() {
             if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
             return;
           }
+          // Vollständige Response loggen (hilft bei Debugging)
+          const accessToken = response.accessToken || response.access_token;
+          const serverAuthCode = response.serverAuthCode || response.server_auth_code;
+          dbg('Response keys: ' + Object.keys(response).join(', '), 'info');
+          dbg('accessToken: ' + (accessToken ? accessToken.substring(0,30)+'…' : 'fehlt'), 'info');
+          dbg('serverAuthCode: ' + (serverAuthCode ? 'vorhanden' : 'fehlt'), 'info');
+
           dbg('Supabase signInWithIdToken wird aufgerufen…', 'info');
           try {
+            // nonce: undefined → Supabase überspringt Nonce-Validierung
+            // Das ist notwendig weil Median keinen nonce mitgibt
             const { data: signInData, error: signInErr } = await _sb.auth.signInWithIdToken({
               provider: 'google',
-              token: idToken
+              token: idToken,
+              nonce: undefined
             });
             if (signInErr) {
-              dbg('signInWithIdToken Fehler: ' + signInErr.message, 'err');
+              dbg('signInWithIdToken Fehler: ' + signInErr.message + ' | status: ' + signInErr.status, 'err');
+              dbg('Fehler-Details: ' + JSON.stringify(signInErr), 'err');
               showAuthError('Anmeldung fehlgeschlagen: ' + signInErr.message);
               if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
             } else {
-              dbg('✅ Supabase Login via Google erfolgreich: ' + signInData?.user?.email, 'ok');
+              dbg('✅ signInWithIdToken erfolgreich: ' + signInData?.user?.email, 'ok');
+              dbg('Session expires: ' + (signInData?.session?.expires_at || 'unbekannt'), 'info');
               // onAuthStateChange SIGNED_IN feuert automatisch → App wird gezeigt
             }
           } catch(supErr) {
@@ -2129,7 +2142,8 @@ async function signOut() {
 // NICHT setzen wenn Login-Screen gezeigt wird — sonst ignoriert
 // onAuthStateChange den SIGNED_IN Event nach Google/Magic-Link Login.
 let _authInitDone = false;
-let _sessionChecked = false; // Verhindert doppeltes Ausführen nach getSession
+let _sessionChecked = false;
+let _lastLoginTime = null; // Verhindert doppeltes Ausführen nach getSession
 
 async function initApp() {
   // ── 1. Modal swipe handlers ──
@@ -2162,6 +2176,7 @@ async function initApp() {
     renderLists();
     return;
   }
+  dbg('BUILD: ' + (typeof BUILD_VERSION !== 'undefined' ? BUILD_VERSION : 'unbekannt'), 'ok');
   dbg('Supabase client: OK', 'ok');
   dbg('Supabase URL: ' + (SUPABASE_URL || 'LEER!'), SUPABASE_URL ? 'ok' : 'err');
 
@@ -2176,6 +2191,7 @@ async function initApp() {
       if (!_authInitDone) {
         // ── Neuer Login (Google, Magic Link, oder erste Session) ──
         dbg('→ Login → lade App für ' + session.user.email, 'ok');
+        _lastLoginTime = Date.now();
         _authInitDone = true;
         showAuthLoading('Daten laden…');
         const loaded = await loadFromSupabase(session.user.id);
@@ -2205,10 +2221,17 @@ async function initApp() {
       // else: _authInitDone=true aber _currentUserId=null → login nach signOut,
       // auch als neuer Login behandeln — oben durch !_authInitDone abgedeckt nach SIGNED_OUT reset
     } else if (event === 'SIGNED_OUT') {
-      dbg('→ SIGNED_OUT', 'warn');
+      // SIGNED_OUT kann automatisch kommen wenn:
+      // - Session-Token ungültig/abgelaufen (Supabase invalidiert Session)
+      // - signInWithIdToken schlägt intern fehl (race condition)
+      // - Supabase Web Client ID stimmt nicht mit Token-Audience überein
+      const timeSinceLogin = _lastLoginTime ? Math.round((Date.now() - _lastLoginTime) / 1000) : '?';
+      dbg('→ SIGNED_OUT nach ' + timeSinceLogin + 's (manuell oder automatisch?)', 'warn');
+      dbg('  Falls <30s nach Login: Supabase Session-Invalidierung → Web Client ID prüfen', 'warn');
       _authInitDone = false;
       _sessionChecked = false;
       _currentUserId = null;
+      _lastLoginTime = null;
       hideAuthLoading();
       showAuthScreen();
     } else if (event === 'INITIAL_SESSION' && !session) {
