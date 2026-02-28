@@ -2094,92 +2094,198 @@ function googleBtnInner() {
   return '<svg class="auth-google-icon" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>Mit Google anmelden';
 }
 
-// ── Magic Link + Cooldown ──
-let _magicCooldownTimer = null;
-let _magicCooldownEnd   = 0;
-let _magicSending       = false;
+// ══════════════════════════════════════════════════════════════
+// OTP LOGIN — 6-stelliger Code per E-Mail, kein Redirect nötig
+// ══════════════════════════════════════════════════════════════
+let _otpEmail       = '';
+let _otpSending     = false;
+let _otpCooldownEnd = 0;
+let _otpCountdown   = null;
 
-async function sendMagicLink() {
+// ── Schritt 1: OTP-Code senden ──
+async function sendOtp() {
   if (!_sb) { showAuthError('Supabase nicht konfiguriert.'); return; }
-  if (_magicSending) return; // Doppelklick-Schutz
-  const now = Date.now();
-  if (now < _magicCooldownEnd) {
-    const secs = Math.ceil((_magicCooldownEnd - now) / 1000);
-    showAuthError('Bitte warte noch ' + secs + ' Sekunden vor dem nächsten Versuch.');
-    return;
-  }
+  if (_otpSending) return;
 
   const emailEl = document.getElementById('auth-email');
-  const email = emailEl ? emailEl.value.trim() : '';
+  const email   = emailEl ? emailEl.value.trim().toLowerCase() : '';
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showAuthError('Bitte eine gültige E-Mail-Adresse eingeben.');
     emailEl && emailEl.focus();
     return;
   }
+  if (Date.now() < _otpCooldownEnd) {
+    showAuthError('Bitte warte ' + Math.ceil((_otpCooldownEnd - Date.now())/1000) + 's.');
+    return;
+  }
 
-  const btn = document.getElementById('auth-magic-btn');
-  _magicSending = true;
+  _otpSending = true;
+  const btn = document.getElementById('auth-otp-send-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Sende…'; }
   hideAuthError();
 
   try {
     const { error } = await _sb.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: getRedirectURL(), shouldCreateUser: true }
+      options: { shouldCreateUser: true }
     });
 
     if (error) {
-      // Rate-Limit abfangen
       const msg = error.message || '';
-      if (msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('limit') || error.status === 429) {
-        startMagicCooldown(60);
+      if (error.status === 429 || msg.toLowerCase().includes('rate') || msg.toLowerCase().includes('limit')) {
+        _otpCooldownEnd = Date.now() + 60000;
         showAuthError('Zu viele Versuche. Bitte 60 Sekunden warten.');
       } else {
-        showAuthError('Fehler beim Senden: ' + msg);
-        if (btn) { btn.disabled = false; btn.textContent = '✉️ Magic Link senden'; }
+        showAuthError('Fehler: ' + msg);
+        if (btn) { btn.disabled = false; btn.textContent = '✉️ Code per E-Mail senden'; }
       }
-      _magicSending = false;
+      _otpSending = false;
       return;
     }
 
-    // Erfolg → 60s Cooldown starten, Sent-View zeigen
-    startMagicCooldown(60);
+    // ✅ OTP-Eingabe anzeigen
+    _otpEmail = email;
     document.getElementById('auth-form').style.display = 'none';
-    document.getElementById('auth-sent').style.display = 'block';
+    document.getElementById('auth-otp-form').style.display = 'block';
+    const disp = document.getElementById('otp-email-display');
+    if (disp) disp.textContent = email;
+    setTimeout(() => { const d = document.getElementById('otp-0'); if (d) d.focus(); }, 150);
+    _startOtpCountdown(60);
 
   } catch(e) {
-    showAuthError('Netzwerkfehler. Bitte Verbindung prüfen.');
-    if (btn) { btn.disabled = false; btn.textContent = '✉️ Magic Link senden'; }
+    showAuthError('Netzwerkfehler: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '✉️ Code per E-Mail senden'; }
   }
-  _magicSending = false;
+  _otpSending = false;
 }
 
-function startMagicCooldown(seconds) {
-  _magicCooldownEnd = Date.now() + seconds * 1000;
-  if (_magicCooldownTimer) clearInterval(_magicCooldownTimer);
-  _updateCooldownDisplay();
-  _magicCooldownTimer = setInterval(() => {
-    const remaining = Math.ceil((_magicCooldownEnd - Date.now()) / 1000);
-    if (remaining <= 0) {
-      clearInterval(_magicCooldownTimer);
-      _magicCooldownTimer = null;
-      const btn = document.getElementById('auth-magic-btn');
-      if (btn) { btn.disabled = false; btn.textContent = '✉️ Magic Link senden'; }
-      const msg = document.getElementById('auth-cooldown-msg');
-      if (msg) msg.textContent = 'Du kannst jetzt eine neue E-Mail anfordern.';
+// ── OTP Digit Navigation ──
+function otpInput(el, idx) {
+  el.value = el.value.replace(/[^0-9]/g, '').slice(-1);
+  el.classList.toggle('filled', el.value !== '');
+  el.classList.remove('error');
+  const all = _getOtpValue();
+  if (all.length === 6) {
+    document.getElementById('otp-verify-btn').disabled = false;
+    verifyOtp();
+    return;
+  }
+  if (el.value && idx < 5) document.getElementById('otp-' + (idx+1)).focus();
+  document.getElementById('otp-verify-btn').disabled = all.length < 6;
+}
+
+function otpKeydown(event, idx) {
+  if (event.key === 'Backspace') {
+    const el = document.getElementById('otp-' + idx);
+    if (!el.value && idx > 0) {
+      const prev = document.getElementById('otp-' + (idx-1));
+      prev.value = ''; prev.classList.remove('filled'); prev.focus();
+    }
+    document.getElementById('otp-verify-btn').disabled = true;
+  }
+  if (event.key === 'Enter') { event.preventDefault(); verifyOtp(); }
+}
+
+function _getOtpValue() {
+  return [0,1,2,3,4,5].map(i => {
+    const el = document.getElementById('otp-' + i);
+    return el ? el.value : '';
+  }).join('');
+}
+
+function _clearOtpInputs() {
+  [0,1,2,3,4,5].forEach(i => {
+    const d = document.getElementById('otp-' + i);
+    if (d) { d.value = ''; d.disabled = false; d.classList.remove('filled','error'); }
+  });
+  const vBtn = document.getElementById('otp-verify-btn');
+  if (vBtn) { vBtn.disabled = true; vBtn.textContent = '✓ Anmelden'; }
+}
+
+// ── Schritt 2: OTP verifizieren ──
+async function verifyOtp() {
+  const token = _getOtpValue();
+  if (token.length < 6) return;
+
+  const btn = document.getElementById('otp-verify-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Prüfe…'; }
+  hideOtpError();
+  [0,1,2,3,4,5].forEach(i => {
+    const d = document.getElementById('otp-' + i); if (d) d.disabled = true;
+  });
+
+  try {
+    const { data, error } = await _sb.auth.verifyOtp({
+      email: _otpEmail, token, type: 'email'
+    });
+
+    if (error) {
+      showOtpError('Falscher oder abgelaufener Code. Bitte erneut versuchen.');
+      _clearOtpInputs();
+      [0,1,2,3,4,5].forEach(i => {
+        const d = document.getElementById('otp-' + i);
+        if (d) { d.classList.add('error'); setTimeout(() => d.classList.remove('error'), 400); }
+      });
+      setTimeout(() => { const d = document.getElementById('otp-0'); if(d) d.focus(); }, 100);
+      if (btn) { btn.disabled = true; }
+      return;
+    }
+    dbg('✅ OTP verifiziert: ' + data?.user?.email, 'ok');
+    // onAuthStateChange SIGNED_IN feuert automatisch
+
+  } catch(e) {
+    showOtpError('Netzwerkfehler: ' + e.message);
+    [0,1,2,3,4,5].forEach(i => { const d = document.getElementById('otp-' + i); if(d) d.disabled = false; });
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Anmelden'; }
+  }
+}
+
+async function resendOtp() {
+  if (Date.now() < _otpCooldownEnd) return;
+  hideOtpError();
+  _clearOtpInputs();
+  const { error } = await _sb.auth.signInWithOtp({
+    email: _otpEmail, options: { shouldCreateUser: true }
+  });
+  if (error) {
+    showOtpError('Fehler: ' + error.message);
+  } else {
+    showOtpError('✅ Neuer Code gesendet!');
+    setTimeout(hideOtpError, 3000);
+    _startOtpCountdown(60);
+    setTimeout(() => { const d = document.getElementById('otp-0'); if(d) d.focus(); }, 100);
+  }
+}
+
+function _startOtpCountdown(secs) {
+  _otpCooldownEnd = Date.now() + secs * 1000;
+  const resendBtn = document.getElementById('otp-resend-btn');
+  const countEl   = document.getElementById('otp-countdown');
+  if (resendBtn) resendBtn.disabled = true;
+  if (_otpCountdown) clearInterval(_otpCountdown);
+  _otpCountdown = setInterval(() => {
+    const rem = Math.ceil((_otpCooldownEnd - Date.now()) / 1000);
+    if (rem > 0) {
+      if (countEl) countEl.textContent = rem;
     } else {
-      _updateCooldownDisplay(remaining);
+      clearInterval(_otpCountdown);
+      if (resendBtn) { resendBtn.disabled = false; resendBtn.innerHTML = 'Neuen Code senden'; }
     }
   }, 1000);
 }
-function _updateCooldownDisplay(remaining) {
-  const msg = document.getElementById('auth-cooldown-msg');
-  if (msg) {
-    msg.textContent = remaining
-      ? 'Neuer Link in ' + remaining + 's möglich.'
-      : '';
-  }
+
+function showOtpError(msg) {
+  const el = document.getElementById('auth-error-otp');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
 }
+function hideOtpError() {
+  const el = document.getElementById('auth-error-otp');
+  if (el) { el.style.display = 'none'; el.textContent = ''; }
+}
+
+// Alias für Kompatibilität
+function sendMagicLink() { sendOtp(); }
+function startMagicCooldown() {}
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
