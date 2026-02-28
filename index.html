@@ -999,7 +999,7 @@
       <div class="auth-sent-title" style="font-size:17px;text-align:center;margin-bottom:4px">Code eingeben</div>
       <div class="otp-email-display" id="otp-email-display"></div>
       <div style="text-align:center;font-size:12px;color:var(--text3);margin-bottom:4px">
-        Code aus der E-Mail eingeben oder einfügen
+        6–8-stelliger Code · gültig 10 Minuten
       </div>
 
       <!-- Einzelnes großes Eingabefeld — funktioniert mit Paste, Tastatur & Autofill -->
@@ -1757,7 +1757,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-G';
+const BUILD_VERSION = 'v2026-02-28-H';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2130,26 +2130,39 @@ async function sendOtp() {
 }
 
 // ── OTP Navigation (Single Input) ──
+// OTP-Länge: 6-8 Stellen werden akzeptiert (Supabase-Einstellung)
+// Der Button aktiviert sich ab 6 Stellen, Auto-Submit ab 8 oder Enter
+const OTP_MIN = 6;
+const OTP_MAX = 8;
+
+function _clearOtpInputs() {
+  const inp = document.getElementById('otp-input');
+  if (inp) { inp.value = ''; inp.disabled = false; inp.classList.remove('filled', 'error'); }
+  const vBtn = document.getElementById('otp-verify-btn');
+  if (vBtn) { vBtn.disabled = true; vBtn.textContent = '✓ Anmelden'; }
+}
+
 function otpSingleInput(el) {
-  el.value = el.value.replace(/[^0-9]/g, '').slice(0, OTP_LEN);
+  el.value = el.value.replace(/[^0-9]/g, '').slice(0, OTP_MAX);
   el.classList.toggle('filled', el.value.length > 0);
   el.classList.remove('error');
   const vBtn = document.getElementById('otp-verify-btn');
-  if (vBtn) vBtn.disabled = el.value.length < OTP_LEN;
-  if (el.value.length === OTP_LEN) verifyOtp();
+  if (vBtn) vBtn.disabled = el.value.length < OTP_MIN;
+  // Auto-Submit wenn Max erreicht
+  if (el.value.length === OTP_MAX) verifyOtp();
 }
 
 function otpSinglePaste(event) {
   event.preventDefault();
   const text = (event.clipboardData || window.clipboardData).getData('text');
-  const digits = text.replace(/[^0-9]/g, '').slice(0, OTP_LEN);
+  const digits = text.replace(/[^0-9]/g, '').slice(0, OTP_MAX);
   const inp = document.getElementById('otp-input');
   if (!inp || !digits) return;
   inp.value = digits;
   inp.classList.toggle('filled', digits.length > 0);
   const vBtn = document.getElementById('otp-verify-btn');
-  if (vBtn) vBtn.disabled = digits.length < OTP_LEN;
-  if (digits.length >= OTP_LEN) setTimeout(verifyOtp, 100);
+  if (vBtn) vBtn.disabled = digits.length < OTP_MIN;
+  if (digits.length >= OTP_MIN) setTimeout(verifyOtp, 100);
 }
 
 function _getOtpValue() {
@@ -2164,7 +2177,7 @@ function otpPaste(event) {
 // ── Schritt 2: OTP verifizieren ──
 async function verifyOtp() {
   const token = _getOtpValue();
-  if (token.length < OTP_LEN) return;
+  if (token.length < OTP_MIN) return;
 
   const btn = document.getElementById('otp-verify-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Prüfe…'; }
