@@ -2107,7 +2107,11 @@ async function signOut() {
 // ╔══════════════════════════════════════════════════════╗
 // ║  INIT  –  stable session bootstrap                    ║
 // ╚══════════════════════════════════════════════════════╝
+// _authInitDone = true NUR wenn User eingeloggt ist und App gezeigt wird.
+// NICHT setzen wenn Login-Screen gezeigt wird — sonst ignoriert
+// onAuthStateChange den SIGNED_IN Event nach Google/Magic-Link Login.
 let _authInitDone = false;
+let _sessionChecked = false; // Verhindert doppeltes Ausführen nach getSession
 
 async function initApp() {
   // ── 1. Modal swipe handlers ──
@@ -2149,58 +2153,88 @@ async function initApp() {
   // ── onAuthStateChange ZUERST registrieren ──
   _sb.auth.onAuthStateChange(async (event, session) => {
     dbg('onAuthStateChange: event=' + event + ' | user=' + (session?.user?.email || 'none'), 'evt');
+
     if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
       if (!_authInitDone) {
-        dbg('→ Erster Login erkannt, lade Daten…', 'ok');
+        // ── Neuer Login (Google, Magic Link, oder erste Session) ──
+        dbg('→ Login → lade App für ' + session.user.email, 'ok');
         _authInitDone = true;
         showAuthLoading('Daten laden…');
         const loaded = await loadFromSupabase(session.user.id);
-        dbg('Supabase Daten geladen: ' + loaded, loaded ? 'ok' : 'warn');
+        dbg('Supabase Daten: ' + loaded, loaded ? 'ok' : 'warn');
         if (!loaded) loadLocal();
         showApp(session.user);
         renderLists();
         showScreen('screen-lists');
         hideAuthLoading();
         dbg('✅ Eingeloggt als: ' + session.user.email, 'ok');
-      } else {
-        dbg('→ Token-Refresh (bereits eingeloggt)', 'info');
+      } else if (_currentUserId && _currentUserId === session.user.id) {
+        // ── Echter Token-Refresh für bereits eingeloggten User ──
+        dbg('→ Token-Refresh für ' + session.user.email, 'info');
         _currentUserId = session.user.id;
+      } else if (_currentUserId && _currentUserId !== session.user.id) {
+        // ── User-Wechsel (unwahrscheinlich aber möglich) ──
+        dbg('→ User-Wechsel → App neu laden', 'warn');
+        _authInitDone = true;
+        showAuthLoading('Daten laden…');
+        const loaded = await loadFromSupabase(session.user.id);
+        if (!loaded) loadLocal();
+        showApp(session.user);
+        renderLists();
+        showScreen('screen-lists');
+        hideAuthLoading();
       }
+      // else: _authInitDone=true aber _currentUserId=null → login nach signOut,
+      // auch als neuer Login behandeln — oben durch !_authInitDone abgedeckt nach SIGNED_OUT reset
     } else if (event === 'SIGNED_OUT') {
-      dbg('→ SIGNED_OUT empfangen', 'warn');
+      dbg('→ SIGNED_OUT', 'warn');
       _authInitDone = false;
+      _sessionChecked = false;
       _currentUserId = null;
       hideAuthLoading();
       showAuthScreen();
+    } else if (event === 'INITIAL_SESSION' && !session) {
+      // ── Kein User beim App-Start → Login-Screen ──
+      // WICHTIG: _authInitDone bleibt false!
+      // Damit SIGNED_IN nach Google/Magic-Link noch verarbeitet wird.
+      if (!_sessionChecked) {
+        _sessionChecked = true;
+        dbg('→ INITIAL_SESSION ohne Session → Login-Screen', 'info');
+        hideAuthLoading();
+        showAuthScreen();
+      }
     } else {
-      dbg('→ Anderes Event ohne Session: ' + event, 'info');
+      dbg('→ Event ignoriert: ' + event, 'info');
     }
   });
 
-  // ── getSession: bestehende Session prüfen (inkl. OAuth PKCE Austausch) ──
+  // ── getSession: bestehende Session prüfen ──
   dbg('getSession() wird aufgerufen…', 'info');
   const { data: { session: initialSession }, error: sessionError } = await _sb.auth.getSession();
-  dbg('getSession() Ergebnis: ' + (initialSession ? 'Session vorhanden (' + initialSession.user?.email + ')' : 'Keine Session') + (sessionError ? ' | FEHLER: ' + sessionError.message : ''), initialSession ? 'ok' : 'info');
+  dbg('getSession(): ' + (initialSession ? 'Session (' + initialSession.user?.email + ')' : 'keine') + (sessionError ? ' | ERR: ' + sessionError.message : ''), initialSession ? 'ok' : 'info');
 
   if (initialSession?.user && !_authInitDone) {
-    dbg('→ Bestehende Session gefunden, lade App…', 'ok');
+    // Bestehende Session beim App-Neustart
+    dbg('→ Bestehende Session → lade App', 'ok');
     _authInitDone = true;
     showAuthLoading('Daten laden…');
     const loaded = await loadFromSupabase(initialSession.user.id);
-    dbg('Supabase Daten geladen: ' + loaded, loaded ? 'ok' : 'warn');
+    dbg('Supabase Daten: ' + loaded, loaded ? 'ok' : 'warn');
     if (!loaded) loadLocal();
     showApp(initialSession.user);
     renderLists();
     showScreen('screen-lists');
     hideAuthLoading();
-    dbg('✅ Eingeloggt (bestehende Session): ' + initialSession.user.email, 'ok');
-  } else if (!initialSession && !_authInitDone) {
-    dbg('→ Keine Session → Login-Screen anzeigen', 'info');
-    _authInitDone = true;
+    dbg('✅ Session wiederhergestellt: ' + initialSession.user.email, 'ok');
+  } else if (!initialSession && !_sessionChecked && !_authInitDone) {
+    // getSession meldet keine Session, INITIAL_SESSION hat noch nicht gefeuert
+    _sessionChecked = true;
+    dbg('→ Keine Session (getSession) → Login-Screen', 'info');
+    // _authInitDone bleibt false → SIGNED_IN nach Login wird verarbeitet!
     hideAuthLoading();
     showAuthScreen();
-  } else {
-    dbg('→ _authInitDone bereits true (onAuthStateChange hat zuerst gefeuert)', 'info');
+  } else if (_authInitDone) {
+    dbg('→ onAuthStateChange hat bereits eingeloggt', 'info');
   }
 }
 
