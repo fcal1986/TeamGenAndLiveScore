@@ -996,7 +996,8 @@
       <div class="otp-wrap">
         <input class="otp-digit" id="otp-0" type="text" inputmode="numeric"
           maxlength="1" pattern="[0-9]" autocomplete="one-time-code"
-          oninput="otpInput(this,0)" onkeydown="otpKeydown(event,0)" onfocus="this.select()">
+          oninput="otpInput(this,0)" onkeydown="otpKeydown(event,0)"
+          onpaste="otpPaste(event)" onfocus="this.select()">
         <input class="otp-digit" id="otp-1" type="text" inputmode="numeric"
           maxlength="1" pattern="[0-9]"
           oninput="otpInput(this,1)" onkeydown="otpKeydown(event,1)" onfocus="this.select()">
@@ -1754,7 +1755,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-C-OTP';
+const BUILD_VERSION = 'v2026-02-28-D';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1948,14 +1949,6 @@ function showApp(user) {
   }
 }
 
-// Nonce für Google Login (verhindert Supabase Session-Invalidierung)
-let _googleNonce = null;
-function _generateNonce() {
-  const arr = new Uint8Array(32);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
 // ── Google OAuth: Median native SDK ODER Browser OAuth ──
 // Warum: Google verbietet OAuth in WebViews. Median Social Login
 // Plugin nutzt natives Google SDK → kein Browser nötig.
@@ -1987,66 +1980,41 @@ async function signInWithGoogle() {
   if (isMedian && hasSocialLogin) {
     dbg('→ Median native Google SDK wird aufgerufen', 'ok');
     try {
-      // Nonce generieren — verhindert Session-Invalidierung durch Supabase
-      _googleNonce = _generateNonce();
-      dbg('Nonce generiert: ' + _googleNonce.substring(0,16) + '…', 'info');
+      // KEIN nonce-Parameter — Median ignoriert ihn und baut ihn nicht
+      // in den idToken ein. Supabase würde dann "Nonces mismatch" melden.
+      // Ohne nonce überspringt Supabase die Nonce-Validierung komplett.
       gn.socialLogin.google.login({
-        nonce: _googleNonce,
         callback: async function(response) {
-          dbg('Google SDK Callback: ' + JSON.stringify(response).substring(0, 120), 'evt');
+          dbg('Google SDK Callback empfangen', 'evt');
           if (response.error) {
             dbg('Google SDK Fehler: ' + response.error, 'err');
             showAuthError('Google Login fehlgeschlagen: ' + response.error);
             if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
             return;
           }
-          // Median Social Login gibt idToken zurück
-          // → direkt an Supabase als ID Token übergeben
           const idToken = response.idToken || response.id_token;
-          dbg('idToken: ' + (idToken ? idToken.substring(0,40)+'…' : 'FEHLT!'), idToken ? 'ok' : 'err');
           if (!idToken) {
-            dbg('Vollständige Response: ' + JSON.stringify(response), 'err');
+            dbg('Kein idToken in Response: ' + JSON.stringify(response), 'err');
             showAuthError('Kein ID Token erhalten. Social Login Plugin konfiguriert?');
             if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
             return;
           }
-          dbg('Response keys: ' + Object.keys(response).join(', '), 'info');
+          dbg('idToken empfangen (' + idToken.length + ' Zeichen)', 'ok');
 
-          // ── Supabase signInWithIdToken mit nonce ──
-          // Wir generieren einen nonce, übergeben ihn an Median,
-          // und denselben an Supabase → Nonce-Validierung klappt.
-          // Da Median den nonce bereits beim login()-Aufruf erhalten hat
-          // (siehe oben), stimmt er mit dem im Token überein.
-          dbg('Supabase signInWithIdToken wird aufgerufen…', 'info');
+          dbg('Supabase signInWithIdToken…', 'info');
           try {
+            // Kein nonce-Parameter → Supabase überspringt Nonce-Check
             const { data: signInData, error: signInErr } = await _sb.auth.signInWithIdToken({
               provider: 'google',
-              token: idToken,
-              nonce: _googleNonce || undefined
+              token: idToken
             });
             if (signInErr) {
               dbg('signInWithIdToken Fehler: ' + signInErr.message, 'err');
-              // Falls nonce-Problem: nochmal ohne nonce versuchen
-              if (signInErr.message && (signInErr.message.includes('nonce') || signInErr.message.includes('audience') || signInErr.message.includes('invalid'))) {
-                dbg('→ Retry ohne nonce…', 'warn');
-                const { data: d2, error: e2 } = await _sb.auth.signInWithIdToken({
-                  provider: 'google',
-                  token: idToken
-                });
-                if (e2) {
-                  dbg('Retry Fehler: ' + e2.message, 'err');
-                  showAuthError('Anmeldung fehlgeschlagen: ' + e2.message);
-                  if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
-                } else {
-                  dbg('✅ Retry erfolgreich: ' + d2?.user?.email, 'ok');
-                }
-              } else {
-                showAuthError('Anmeldung fehlgeschlagen: ' + signInErr.message);
-                if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
-              }
+              showAuthError('Anmeldung fehlgeschlagen: ' + signInErr.message);
+              if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
             } else {
-              dbg('✅ signInWithIdToken OK: ' + signInData?.user?.email, 'ok');
-              dbg('Session expires_at: ' + (signInData?.session?.expires_at || '?'), 'info');
+              dbg('✅ Google Login OK: ' + signInData?.user?.email, 'ok');
+              // onAuthStateChange SIGNED_IN feuert → App wird geladen
             }
           } catch(supErr) {
             dbg('Supabase Exception: ' + supErr.message, 'err');
@@ -2184,6 +2152,22 @@ function otpKeydown(event, idx) {
     document.getElementById('otp-verify-btn').disabled = true;
   }
   if (event.key === 'Enter') { event.preventDefault(); verifyOtp(); }
+}
+
+function otpPaste(event) {
+  event.preventDefault();
+  const text = (event.clipboardData || window.clipboardData).getData('text');
+  const digits = text.replace(/[^0-9]/g, '').slice(0, 6);
+  if (!digits) return;
+  for (let i = 0; i < 6; i++) {
+    const d = document.getElementById('otp-' + i);
+    if (d) { d.value = digits[i] || ''; d.classList.toggle('filled', !!digits[i]); }
+  }
+  const last = Math.min(5, digits.length - 1);
+  const focus = document.getElementById('otp-' + last);
+  if (focus) focus.focus();
+  document.getElementById('otp-verify-btn').disabled = digits.length < 6;
+  if (digits.length === 6) setTimeout(verifyOtp, 100);
 }
 
 function _getOtpValue() {
@@ -2435,9 +2419,16 @@ async function initApp() {
       // - Session-Token ungültig/abgelaufen (Supabase invalidiert Session)
       // - signInWithIdToken schlägt intern fehl (race condition)
       // - Supabase Web Client ID stimmt nicht mit Token-Audience überein
-      const timeSinceLogin = _lastLoginTime ? Math.round((Date.now() - _lastLoginTime) / 1000) : '?';
-      dbg('→ SIGNED_OUT nach ' + timeSinceLogin + 's (manuell oder automatisch?)', 'warn');
-      dbg('  Falls <30s nach Login: Supabase Session-Invalidierung → Web Client ID prüfen', 'warn');
+      const timeSinceLogin = _lastLoginTime ? Math.round((Date.now() - _lastLoginTime) / 1000) : null;
+      if (timeSinceLogin !== null && timeSinceLogin < 30) {
+        dbg('⚠️ AUTO-LOGOUT nach ' + timeSinceLogin + 's!', 'err');
+        dbg('→ Supabase Dashboard prüfen:', 'err');
+        dbg('   Auth → Providers → Google', 'err');
+        dbg('   Client ID = Web OAuth Client ID (nicht Android!)', 'err');
+        dbg('   Client Secret = Web Client Secret', 'err');
+      } else {
+        dbg('→ SIGNED_OUT' + (timeSinceLogin ? ' nach ' + timeSinceLogin + 's' : '') + ' (manuell)', 'warn');
+      }
       _authInitDone = false;
       _sessionChecked = false;
       _currentUserId = null;
