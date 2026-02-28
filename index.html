@@ -1869,6 +1869,14 @@ function showApp(user) {
   }
 }
 
+// Nonce für Google Login (verhindert Supabase Session-Invalidierung)
+let _googleNonce = null;
+function _generateNonce() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
 // ── Google OAuth: Median native SDK ODER Browser OAuth ──
 // Warum: Google verbietet OAuth in WebViews. Median Social Login
 // Plugin nutzt natives Google SDK → kein Browser nötig.
@@ -1900,7 +1908,11 @@ async function signInWithGoogle() {
   if (isMedian && hasSocialLogin) {
     dbg('→ Median native Google SDK wird aufgerufen', 'ok');
     try {
+      // Nonce generieren — verhindert Session-Invalidierung durch Supabase
+      _googleNonce = _generateNonce();
+      dbg('Nonce generiert: ' + _googleNonce.substring(0,16) + '…', 'info');
       gn.socialLogin.google.login({
+        nonce: _googleNonce,
         callback: async function(response) {
           dbg('Google SDK Callback: ' + JSON.stringify(response).substring(0, 120), 'evt');
           if (response.error) {
@@ -1919,31 +1931,43 @@ async function signInWithGoogle() {
             if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
             return;
           }
-          // Vollständige Response loggen (hilft bei Debugging)
-          const accessToken = response.accessToken || response.access_token;
-          const serverAuthCode = response.serverAuthCode || response.server_auth_code;
           dbg('Response keys: ' + Object.keys(response).join(', '), 'info');
-          dbg('accessToken: ' + (accessToken ? accessToken.substring(0,30)+'…' : 'fehlt'), 'info');
-          dbg('serverAuthCode: ' + (serverAuthCode ? 'vorhanden' : 'fehlt'), 'info');
 
+          // ── Supabase signInWithIdToken mit nonce ──
+          // Wir generieren einen nonce, übergeben ihn an Median,
+          // und denselben an Supabase → Nonce-Validierung klappt.
+          // Da Median den nonce bereits beim login()-Aufruf erhalten hat
+          // (siehe oben), stimmt er mit dem im Token überein.
           dbg('Supabase signInWithIdToken wird aufgerufen…', 'info');
           try {
-            // nonce: undefined → Supabase überspringt Nonce-Validierung
-            // Das ist notwendig weil Median keinen nonce mitgibt
             const { data: signInData, error: signInErr } = await _sb.auth.signInWithIdToken({
               provider: 'google',
               token: idToken,
-              nonce: undefined
+              nonce: _googleNonce || undefined
             });
             if (signInErr) {
-              dbg('signInWithIdToken Fehler: ' + signInErr.message + ' | status: ' + signInErr.status, 'err');
-              dbg('Fehler-Details: ' + JSON.stringify(signInErr), 'err');
-              showAuthError('Anmeldung fehlgeschlagen: ' + signInErr.message);
-              if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+              dbg('signInWithIdToken Fehler: ' + signInErr.message, 'err');
+              // Falls nonce-Problem: nochmal ohne nonce versuchen
+              if (signInErr.message && (signInErr.message.includes('nonce') || signInErr.message.includes('audience') || signInErr.message.includes('invalid'))) {
+                dbg('→ Retry ohne nonce…', 'warn');
+                const { data: d2, error: e2 } = await _sb.auth.signInWithIdToken({
+                  provider: 'google',
+                  token: idToken
+                });
+                if (e2) {
+                  dbg('Retry Fehler: ' + e2.message, 'err');
+                  showAuthError('Anmeldung fehlgeschlagen: ' + e2.message);
+                  if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+                } else {
+                  dbg('✅ Retry erfolgreich: ' + d2?.user?.email, 'ok');
+                }
+              } else {
+                showAuthError('Anmeldung fehlgeschlagen: ' + signInErr.message);
+                if (btn) { btn.disabled = false; btn.innerHTML = googleBtnInner(); }
+              }
             } else {
-              dbg('✅ signInWithIdToken erfolgreich: ' + signInData?.user?.email, 'ok');
-              dbg('Session expires: ' + (signInData?.session?.expires_at || 'unbekannt'), 'info');
-              // onAuthStateChange SIGNED_IN feuert automatisch → App wird gezeigt
+              dbg('✅ signInWithIdToken OK: ' + signInData?.user?.email, 'ok');
+              dbg('Session expires_at: ' + (signInData?.session?.expires_at || '?'), 'info');
             }
           } catch(supErr) {
             dbg('Supabase Exception: ' + supErr.message, 'err');
