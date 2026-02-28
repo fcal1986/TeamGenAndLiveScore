@@ -1769,7 +1769,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-P';
+const BUILD_VERSION = 'v2026-02-28-Q';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2442,47 +2442,72 @@ async function initApp() {
   dbg('Supabase client: OK', 'ok');
   dbg('Supabase URL: ' + (SUPABASE_URL || 'LEER!'), SUPABASE_URL ? 'ok' : 'err');
 
-  // ── 4. Show loading while we check session ──
+  // ══════════════════════════════════════════════════════
+  // SOFORTSTART: localStorage direkt lesen — kein async nötig
+  // Supabase speichert Session unter 'sb-<ref>-auth-token'
+  // ══════════════════════════════════════════════════════
+  function _readLocalSession() {
+    try {
+      // Supabase project ref aus URL extrahieren
+      const ref = SUPABASE_URL.match(/https:\/\/([^.]+)\./)?.[1];
+      if (!ref) return null;
+      const raw = localStorage.getItem('sb-' + ref + '-auth-token');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      // Session valide wenn expires_at in der Zukunft liegt
+      const expiresAt = parsed?.expires_at || 0;
+      if (Date.now() / 1000 > expiresAt) {
+        dbg('localStorage Session abgelaufen → Supabase refresh nötig', 'warn');
+        return null; // abgelaufen — Supabase JS refresht im Hintergrund
+      }
+      return parsed;
+    } catch(e) { return null; }
+  }
+
   showAuthLoading('Anmeldung prüfen…');
 
-  // ── onAuthStateChange ZUERST registrieren ──
+  // ── SOFORT: Gespeicherte Session aus localStorage lesen ──
+  const cachedSession = _readLocalSession();
+  if (cachedSession?.user && cachedSession?.access_token) {
+    dbg('⚡ Sofortstart aus localStorage: ' + cachedSession.user.email, 'ok');
+    _authInitDone = true;
+    _lastLoginTime = Date.now();
+    // App sofort zeigen — DB-Sync läuft parallel
+    await _doLoginAndShow(cachedSession.user, cachedSession.access_token);
+    dbg('✅ Sofortstart fertig — Supabase validiert im Hintergrund', 'ok');
+  } else {
+    dbg('Keine localStorage Session → warte auf Supabase…', 'info');
+  }
+
+  // ── onAuthStateChange: Validierung + neue Logins ──
   _sb.auth.onAuthStateChange(async (event, session) => {
     dbg('onAuthStateChange: event=' + event + ' | user=' + (session?.user?.email || 'none'), 'evt');
 
     if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+      // Token immer aktualisieren (auch wenn App schon läuft)
+      _currentToken = session.access_token;
+      _currentUserId = session.user.id;
+
       if (!_authInitDone) {
-        // ── Neuer Login (Google, Magic Link, oder erste Session) ──
+        // Erster Login (kein localStorage Cache vorhanden)
         dbg('→ Login → lade App für ' + session.user.email, 'ok');
         _lastLoginTime = Date.now();
         _authInitDone = true;
         await _doLoginAndShow(session.user, session.access_token);
-      } else if (_currentUserId && _currentUserId === session.user.id) {
-        // ── Echter Token-Refresh für bereits eingeloggten User ──
-        dbg('→ Token-Refresh für ' + session.user.email, 'info');
-        _currentUserId = session.user.id;
-        _currentToken  = session.access_token;  // Token aktuell halten
-      } else if (_currentUserId && _currentUserId !== session.user.id) {
-        // ── User-Wechsel (unwahrscheinlich aber möglich) ──
-        dbg('→ User-Wechsel → App neu laden', 'warn');
-        _authInitDone = true;
-        await _doLoginAndShow(session.user, session.access_token);
+      } else {
+        // App läuft bereits (Sofortstart) → Token + DB-Sync aktualisieren
+        dbg('→ Supabase bestätigt Session, lade DB-Daten…', 'info');
+        const loaded = await loadFromSupabase(session.user.id);
+        if (loaded) { saveLocal(); renderLists(); dbg('✅ DB-Sync nach Sofortstart OK', 'ok'); }
+        else dbg('→ DB-Sync: lokale Daten bleiben', 'warn');
       }
-      // else: _authInitDone=true aber _currentUserId=null → login nach signOut,
-      // auch als neuer Login behandeln — oben durch !_authInitDone abgedeckt nach SIGNED_OUT reset
     } else if (event === 'SIGNED_OUT') {
-      // SIGNED_OUT kann automatisch kommen wenn:
-      // - Session-Token ungültig/abgelaufen (Supabase invalidiert Session)
-      // - signInWithIdToken schlägt intern fehl (race condition)
-      // - Supabase Web Client ID stimmt nicht mit Token-Audience überein
       const timeSinceLogin = _lastLoginTime ? Math.round((Date.now() - _lastLoginTime) / 1000) : null;
       if (timeSinceLogin !== null && timeSinceLogin < 30) {
         dbg('⚠️ AUTO-LOGOUT nach ' + timeSinceLogin + 's!', 'err');
-        dbg('→ Supabase Dashboard prüfen:', 'err');
-        dbg('   Auth → Providers → Google', 'err');
-        dbg('   Client ID = Web OAuth Client ID (nicht Android!)', 'err');
-        dbg('   Client Secret = Web Client Secret', 'err');
+        dbg('→ Supabase Dashboard: Auth → Providers → Google → Client ID prüfen', 'err');
       } else {
-        dbg('→ SIGNED_OUT' + (timeSinceLogin ? ' nach ' + timeSinceLogin + 's' : '') + ' (manuell)', 'warn');
+        dbg('→ SIGNED_OUT' + (timeSinceLogin ? ' nach ' + timeSinceLogin + 's' : ''), 'warn');
       }
       _authInitDone = false;
       _sessionChecked = false;
@@ -2492,12 +2517,9 @@ async function initApp() {
       hideAuthLoading();
       showAuthScreen();
     } else if (event === 'INITIAL_SESSION' && !session) {
-      // ── Kein User beim App-Start → Login-Screen ──
-      // WICHTIG: _authInitDone bleibt false!
-      // Damit SIGNED_IN nach Google/Magic-Link noch verarbeitet wird.
-      if (!_sessionChecked) {
+      if (!_authInitDone && !_sessionChecked) {
         _sessionChecked = true;
-        dbg('→ INITIAL_SESSION ohne Session → Login-Screen', 'info');
+        dbg('→ Keine Session → Login-Screen', 'info');
         hideAuthLoading();
         showAuthScreen();
       }
@@ -2506,26 +2528,18 @@ async function initApp() {
     }
   });
 
-  // ── getSession: bestehende Session prüfen ──
-  dbg('getSession() wird aufgerufen…', 'info');
-  const { data: { session: initialSession }, error: sessionError } = await _sb.auth.getSession();
-  dbg('getSession(): ' + (initialSession ? 'Session (' + initialSession.user?.email + ')' : 'keine') + (sessionError ? ' | ERR: ' + sessionError.message : ''), initialSession ? 'ok' : 'info');
-
-  if (initialSession?.user && !_authInitDone) {
-    // Bestehende Session beim App-Neustart
-    dbg('→ Bestehende Session → lade App', 'ok');
-    _authInitDone = true;
-    await _doLoginAndShow(initialSession.user, initialSession.access_token);
-    dbg('✅ Session wiederhergestellt: ' + initialSession.user.email, 'ok');
-  } else if (!initialSession && !_sessionChecked && !_authInitDone) {
-    // getSession meldet keine Session, INITIAL_SESSION hat noch nicht gefeuert
-    _sessionChecked = true;
-    dbg('→ Keine Session (getSession) → Login-Screen', 'info');
-    // _authInitDone bleibt false → SIGNED_IN nach Login wird verarbeitet!
-    hideAuthLoading();
-    showAuthScreen();
-  } else if (_authInitDone) {
-    dbg('→ onAuthStateChange hat bereits eingeloggt', 'info');
+  // getSession nur noch als Fallback wenn kein localStorage Cache
+  if (!_authInitDone) {
+    dbg('getSession() Fallback…', 'info');
+    const { data: { session: initialSession }, error: sessionError } = await _sb.auth.getSession();
+    dbg('getSession(): ' + (initialSession ? initialSession.user?.email : 'keine') + (sessionError ? ' ERR:' + sessionError.message : ''), 'info');
+    if (initialSession?.user && !_authInitDone) {
+      _authInitDone = true;
+      await _doLoginAndShow(initialSession.user, initialSession.access_token);
+    } else if (!initialSession && !_authInitDone) {
+      hideAuthLoading();
+      showAuthScreen();
+    }
   }
 }
 
