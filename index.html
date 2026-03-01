@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-A';
+const BUILD_VERSION = 'v2026-03-01-B';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2935,11 +2935,13 @@ async function sendInvitation() {
   if (!list) return;
 
   // Gruppe zuerst in shared_groups anlegen wenn noch nicht geteilt
-  let groupId = list._sharedGroupId || state.currentListId;
-  const isNewShare = !list._sharedGroupId;
+  // Echte UUID für Supabase (list.id ist kein UUID-Format)
+  let groupId = list._sharedGroupId || null;
+  const isNewShare = !groupId;
 
   if (isNewShare) {
-    dbg('Erstelle shared_group…', 'info');
+    groupId = uuidv4();
+    dbg('Erstelle shared_group mit UUID: ' + groupId, 'info');
     const created = await _shRest('POST', 'shared_groups', null, {
       id: groupId,
       name: list.name,
@@ -4229,6 +4231,13 @@ function swipeEnd(e, el) {
 
 // ===================== UTILS =====================
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function uuidv4() {
+  // Echter RFC4122 UUID für Supabase UUID-Spalten
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
 
 // ── Custom confirm dialog ──
 let _confirmCallback = null;
