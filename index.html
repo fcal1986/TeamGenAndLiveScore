@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-J';
+const BUILD_VERSION = 'v2026-03-01-K';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2066,51 +2066,51 @@ function hideAuthLoading() {
 // ── Sicheres Login+Load: Spinner wird IMMER beendet ──
 async function _doLoginAndShow(user, token) {
   showAuthLoading('Daten laden…');
-  // WICHTIG: UserId + Token ZUERST setzen
+  // ALLES sofort setzen — Email als erstes damit loadPendingInvitations funktioniert
   _currentUserId = user.id;
   _currentToken  = token;
+  _setUserEmail(user.email);  // ← HIER, nicht am Ende
   try {
     dbg('Lade Daten für ' + user.email + '…', 'info');
-    // 1. Zuerst lokale Daten laden als Sofort-Fallback
     const hasLocal = loadLocal();
     dbg('Lokale Daten: ' + (hasLocal ? 'vorhanden' : 'keine'), 'info');
-    // 2. Supabase versuchen (überschreibt lokale wenn erfolgreich)
     const loaded = await loadFromSupabase(user.id);
     dbg('Supabase Daten: ' + (loaded ? 'OK' : 'Timeout/Fehler → behalte lokale'), loaded ? 'ok' : 'warn');
-    // 3. Wenn Supabase Daten hat → lokal sichern für nächstes Mal
     if (loaded) saveLocal();
     showApp(user);
     renderLists();
     showScreen('screen-lists');
     dbg('✅ App bereit: ' + user.email, 'ok');
+
+    // Geteilte Gruppen + Einladungen laden (mit Timeout-Schutz)
+    const sgTimeout = new Promise(r => setTimeout(() => r('timeout'), 5000));
+    const sgLoad    = loadSharedGroups();
+    const sgResult  = await Promise.race([sgLoad, sgTimeout]);
+    if (sgResult === 'timeout') {
+      dbg('loadSharedGroups Timeout → wird nach SIGNED_IN nachgeholt', 'warn');
+    }
+
     // Gespeicherte Einladung aus URL prüfen
     const pendingInvite = localStorage.getItem('_pendingInviteId');
     if (pendingInvite) {
       localStorage.removeItem('_pendingInviteId');
       dbg('Verarbeite gespeicherte Einladung: ' + pendingInvite, 'info');
-      // Kurz warten bis loadSharedGroups fertig ist, dann Einladung zeigen
       setTimeout(async () => {
         const inv = _pendingInvitations.find(i => i.id === pendingInvite);
-        if (inv) showAcceptModal(inv.id);
-        else {
-          // Direkt aus DB laden
-          const rows = await _shRest('GET', 'group_invitations',
-            'id=eq.' + encodeURIComponent(pendingInvite) + '&select=id,group_id,role,invited_by', null);
-          if (rows && rows[0]) {
-            const gnames = await _shRest('GET', 'shared_groups',
-              'id=eq.' + encodeURIComponent(rows[0].group_id) + '&select=id,name', null);
-            _currentInvite = { ...rows[0], groupName: gnames?.[0]?.name || 'Gruppe' };
-            document.getElementById('accept-invite-title').textContent = 'Einladung: ' + _currentInvite.groupName;
-            document.getElementById('accept-invite-sub').textContent =
-              'Du wirst als ' + (_currentInvite.role === 'admin' ? 'Admin' : 'Leser') + ' hinzugefügt.';
-            openModal('modal-accept-invite');
-          }
+        if (inv) { showAcceptModal(inv.id); return; }
+        const rows = await _shRest('GET', 'group_invitations',
+          'id=eq.' + encodeURIComponent(pendingInvite) + '&select=id,group_id,role,invited_by', null);
+        if (rows?.[0]) {
+          const gnames = await _shRest('GET', 'shared_groups',
+            'id=eq.' + encodeURIComponent(rows[0].group_id) + '&select=id,name', null);
+          _currentInvite = { ...rows[0], groupName: gnames?.[0]?.name || 'Gruppe' };
+          document.getElementById('accept-invite-title').textContent = 'Einladung: ' + _currentInvite.groupName;
+          document.getElementById('accept-invite-sub').textContent =
+            'Du wirst als ' + (_currentInvite.role === 'admin' ? 'Admin' : 'Leser') + ' hinzugefügt.';
+          openModal('modal-accept-invite');
         }
-      }, 1500);
+      }, 1000);
     }
-    // Email ZUERST setzen, dann geteilte Gruppen laden
-    _setUserEmail(user.email);
-    await loadSharedGroups(); // await damit Einladungen sofort sichtbar sind
   } catch(e) {
     dbg('_doLoginAndShow Fehler: ' + e.message, 'err');
     try { showApp(user); renderLists(); showScreen('screen-lists'); } catch(_) {}
@@ -2667,8 +2667,9 @@ async function initApp() {
         const loaded = await loadFromSupabase(session.user.id);
         if (loaded) { saveLocal(); renderLists(); dbg('✅ DB-Sync nach Sofortstart OK', 'ok'); }
         else dbg('→ DB-Sync: lokale Daten bleiben', 'warn');
-        // Einladungen frisch laden (Pull)
-        await loadPendingInvitations();
+        // Geteilte Gruppen + Einladungen frisch laden (frischer Token!)
+        dbg('SIGNED_IN: lade Einladungen mit frischem Token…', 'info');
+        await loadSharedGroups();
       }
     } else if (event === 'SIGNED_OUT') {
       const timeSinceLogin = _lastLoginTime ? Math.round((Date.now() - _lastLoginTime) / 1000) : null;
@@ -2737,9 +2738,8 @@ async function initApp() {
 async function _shRest(method, table, params, body) {
   let token = _getToken();
   if (!token) {
-    dbg('shRest: kein Token → warte auf Re-Login (max 8s)…', 'warn');
-    // Warte bis onAuthStateChange wieder einen Token setzt (max 8 Versuche)
-    for (let i = 0; i < 8; i++) {
+    dbg('shRest: kein Token → warte max 3s…', 'warn');
+    for (let i = 0; i < 3; i++) {
       await new Promise(r => setTimeout(r, 1000));
       token = _getToken();
       if (token) { dbg('shRest: Token nach ' + (i+1) + 's verfügbar', 'ok'); break; }
@@ -2830,6 +2830,7 @@ async function loadSharedGroups() {
     if (!members || members.length === 0) {
       _sharedGroups = [];
       renderLists();
+      await loadPendingInvitations(); // ← auch ohne Mitgliedschaft prüfen!
       return;
     }
     // Gruppen-Daten laden
@@ -2874,6 +2875,7 @@ async function loadPendingInvitations() {
     'group_invitations',
     'email=eq.' + encodeURIComponent(email) + '&accepted_at=is.null&select=id,group_id,role,invited_by',
     null);
+  dbg('Einladungen DB-Antwort: ' + JSON.stringify(invites)?.substring(0,80), 'info');
   if (!invites || invites.length === 0) {
     _pendingInvitations = [];
     renderInvitationBanners();
