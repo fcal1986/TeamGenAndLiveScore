@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-E';
+const BUILD_VERSION = 'v2026-03-01-G';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -3097,18 +3097,54 @@ async function sendInvitation() {
     dbg('Einladung erstellt: ' + invId, 'ok');
 
     // ── Schritt 5: E-Mail senden ──────────────────────────
+    // Prüfen ob User bereits in user_data registriert ist
+    let userExists = false;
     try {
-      await _sb.auth.signInWithOtp({
+      const existing = await _sbRestFetch(
+        'GET',
+        'user_data?select=user_id&limit=1',
+        null,
+        _currentToken
+      );
+      // Das gibt nur eigene Daten zurück — für fremde User brauchen wir
+      // einen anderen Check: versuche OTP zu senden und prüfe Response
+      userExists = false; // Default: unbekannt → immer Mail senden
+    } catch(e) {}
+
+    const appUrl = 'https://fcal1986.github.io/TeamGenAndLiveScore/?invite=' + invId;
+    try {
+      // Schritt 1: Bestehenden User ansprechen (kein neuer Account)
+      const { error: otpError } = await _sb.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: 'https://fcal1986.github.io/TeamGenAndLiveScore/?invite=' + invId,
-          data: { invited_to: list.name, role }
+          emailRedirectTo: appUrl,
+          shouldCreateUser: false,
+          data: { invited_to: list.name, role, invite_id: invId }
         }
       });
-      dbg('Magic Link E-Mail gesendet an ' + email, 'ok');
+
+      if (otpError && (otpError.message?.toLowerCase().includes('not found')
+                    || otpError.message?.toLowerCase().includes('signups not allowed')
+                    || otpError.status === 422 || otpError.status === 400)) {
+        // User existiert noch nicht → Account erstellen + Einladungs-Mail
+        dbg('Neuer User erkannt → sende Registrierungs-Mail mit Link + Code', 'info');
+        const { error: newErr } = await _sb.auth.signInWithOtp({
+          email,
+          options: {
+            emailRedirectTo: appUrl,
+            shouldCreateUser: true,
+            data: { invited_to: list.name, role, invite_id: invId }
+          }
+        });
+        if (newErr) dbg('Registrierungs-Mail Fehler: ' + newErr.message, 'warn');
+        else dbg('✅ Einladungs-Mail (Neu-User, Link + Code) → ' + email, 'ok');
+      } else if (otpError) {
+        dbg('OTP Warnung: ' + otpError.message, 'warn');
+      } else {
+        dbg('✅ Einladungs-Mail (bestehender User, Magic Link) → ' + email, 'ok');
+      }
     } catch(e) {
-      dbg('Magic Link Warnung: ' + e.message, 'warn');
-      // Kein Fehler — User ist evtl. bereits registriert, Banner reicht
+      dbg('E-Mail Fehler: ' + e.message, 'warn');
     }
 
     _shLogActivity(groupId, 'eingeladen', email + ' als ' + (role === 'admin' ? 'Admin' : 'Leser'));
