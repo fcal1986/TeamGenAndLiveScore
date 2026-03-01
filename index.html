@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-C';
+const BUILD_VERSION = 'v2026-03-01-D';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2579,19 +2579,31 @@ async function initApp() {
   // ══════════════════════════════════════════════════════
   function _readLocalSession() {
     try {
-      // Supabase project ref aus URL extrahieren
       const ref = SUPABASE_URL.match(/https:\/\/([^.]+)\./)?.[1];
       if (!ref) return null;
       const raw = localStorage.getItem('sb-' + ref + '-auth-token');
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      // Session valide wenn expires_at in der Zukunft liegt
-      const expiresAt = parsed?.expires_at || 0;
+      // Supabase speichert Session flach oder in currentSession
+      const session = parsed?.currentSession || parsed;
+      const expiresAt = session?.expires_at || 0;
       if (Date.now() / 1000 > expiresAt) {
         dbg('localStorage Session abgelaufen → Supabase refresh nötig', 'warn');
-        return null; // abgelaufen — Supabase JS refresht im Hintergrund
+        return null;
       }
-      return parsed;
+      // Token-Claim prüfen: muss 'authenticated' role haben
+      const token = session?.access_token;
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          dbg('Token role: ' + payload.role + ' | exp: ' + new Date(payload.exp*1000).toLocaleTimeString(), 'info');
+          if (payload.role !== 'authenticated') {
+            dbg('Token hat falsche role: ' + payload.role + ' → kein Sofortstart', 'err');
+            return null;
+          }
+        } catch(e) { dbg('Token decode Fehler: ' + e.message, 'warn'); }
+      }
+      return { ...session, user: session?.user || parsed?.currentUser };
     } catch(e) { return null; }
   }
 
@@ -2682,19 +2694,23 @@ async function initApp() {
 // ── REST-Helpers für Sharing-Tabellen ──
 async function _shRest(method, table, params, body) {
   let token = _getToken();
-  // Kein Token → frischen Token via getSession holen
   if (!token) {
     dbg('shRest: kein Token im Cache, hole frischen…', 'warn');
     try {
       const { data: { session } } = await _sb.auth.getSession();
-      if (session?.access_token) {
-        token = session.access_token;
-        _currentToken = token;
-        dbg('shRest: frischer Token geholt', 'ok');
-      }
+      if (session?.access_token) { token = session.access_token; _currentToken = token; }
     } catch(e) { dbg('shRest: getSession Fehler: ' + e.message, 'err'); }
   }
   if (!token) { dbg('shRest: kein Token → abgebrochen', 'err'); return null; }
+  // Token-Claim prüfen
+  try {
+    const p = JSON.parse(atob(token.split('.')[1]));
+    if (p.role !== 'authenticated') {
+      dbg('shRest WARNUNG: Token role=' + p.role + ' (erwartet: authenticated)!', 'err');
+    }
+    const expIn = Math.round(p.exp - Date.now()/1000);
+    if (expIn < 60) dbg('shRest: Token läuft in ' + expIn + 's ab!', 'warn');
+  } catch(e) {}
 
   let url = SUPABASE_URL + '/rest/v1/' + table;
   if (params) url += '?' + params;
