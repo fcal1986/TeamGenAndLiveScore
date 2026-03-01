@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-I';
+const BUILD_VERSION = 'v2026-03-01-J';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2108,9 +2108,9 @@ async function _doLoginAndShow(user, token) {
         }
       }, 1500);
     }
-    // Email setzen + geteilte Gruppen laden
+    // Email ZUERST setzen, dann geteilte Gruppen laden
     _setUserEmail(user.email);
-    loadSharedGroups(); // async, im Hintergrund
+    await loadSharedGroups(); // await damit Einladungen sofort sichtbar sind
   } catch(e) {
     dbg('_doLoginAndShow Fehler: ' + e.message, 'err');
     try { showApp(user); renderLists(); showScreen('screen-lists'); } catch(_) {}
@@ -2146,18 +2146,29 @@ function showAuthScreen() {
 
 function showApp(user) {
   dbg('showApp: ' + user.email, 'info');
-  // Sanftes Polling: alle 60s Einladungen + geteilte Gruppen prüfen
+  // Polling alle 30s + bei App-Focus
   if (window._invitePollTimer) clearInterval(window._invitePollTimer);
   window._invitePollTimer = setInterval(async () => {
     if (!_currentUserId || !_currentToken) return;
     const before = _pendingInvitations.length;
-    await loadPendingInvitations();
+    await loadSharedGroups(); // lädt auch Einladungen
     if (_pendingInvitations.length > before) {
       dbg('🔔 Neue Einladung erkannt (Poll)', 'ok');
     }
-    // Shared Groups auf Updates prüfen
-    await loadSharedGroups();
-  }, 60000);
+  }, 30000);
+  // Bei App-Focus (Tab wechsel / App in Vordergrund)
+  if (!window._focusListenerAdded) {
+    window._focusListenerAdded = true;
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible' && _currentUserId && _currentToken) {
+        dbg('App Focus → prüfe Einladungen', 'info');
+        await loadSharedGroups();
+      }
+    });
+    window.addEventListener('focus', async () => {
+      if (_currentUserId && _currentToken) await loadSharedGroups();
+    });
+  }
   _currentUserId = user.id;
   document.getElementById('screen-auth').style.display = 'none';
   hideAuthLoading();
@@ -2853,10 +2864,15 @@ async function loadSharedGroups() {
 
 // ── Offene Einladungen laden ──
 async function loadPendingInvitations() {
-  if (!_currentUserEmail || !_currentToken) return;
+  const email = _currentUserEmail;
+  if (!email || !_currentToken) {
+    dbg('loadPendingInvitations: kein Email/Token (' + (email||'null') + ')', 'warn');
+    return;
+  }
+  dbg('Prüfe Einladungen für ' + email + '…', 'info');
   const invites = await _shRest('GET',
     'group_invitations',
-    'email=eq.' + encodeURIComponent(_currentUserEmail) + '&accepted_at=is.null&select=id,group_id,role,invited_by',
+    'email=eq.' + encodeURIComponent(email) + '&accepted_at=is.null&select=id,group_id,role,invited_by',
     null);
   if (!invites || invites.length === 0) {
     _pendingInvitations = [];
@@ -3007,25 +3023,33 @@ async function openShareModal() {
   const pendingHtml = pendingInvs.length ? `
     <div style="font-size:12px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin:14px 0 8px">
       Ausstehend (${pendingInvs.length})
-    </div>` + pendingInvs.map(inv => `
-    <div class="member-row" style="opacity:0.75">
-      <div class="member-avatar" style="background:var(--surface2);color:var(--text3)">${(inv.email||'?')[0].toUpperCase()}</div>
-      <div class="member-info">
-        <div class="member-email">${inv.email}</div>
-        <div class="member-role">
-          <span class="role-badge ${inv.role}" style="opacity:0.7">${inv.role==='admin'?'⚡ Admin':'👁 Leser'} · ausstehend</span>
-          ${isAdmin ? `
-            <button onclick="resendInvitation('${inv.id}','${inv.email}','${inv.role}')"
-              style="margin-left:8px;background:none;border:none;color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">
-              🔄 Erneut senden</button>
-            <button onclick="cancelInvitation('${inv.id}','${inv.email}')"
-              style="margin-left:4px;background:none;border:none;color:var(--danger);font-size:11px;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">
-              Zurückziehen</button>` : ''}
+    </div>` + pendingInvs.map((inv,i) => {
+      const safeMail = (inv.email||'').replace(/'/g,"\\'");
+      return `<div class="member-row pending-inv-row" style="opacity:0.8"
+        data-inv-id="${inv.id}" data-inv-email="${inv.email}" data-inv-role="${inv.role}">
+        <div class="member-avatar" style="background:var(--surface2);color:var(--text3)">${(inv.email||'?')[0].toUpperCase()}</div>
+        <div class="member-info" style="flex:1">
+          <div class="member-email">${inv.email}</div>
+          <div class="member-role" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px">
+            <span class="role-badge ${inv.role}" style="opacity:0.7">${inv.role==='admin'?'⚡ Admin':'👁 Leser'}</span>
+            <span style="color:var(--text3);font-size:11px">· ausstehend</span>
+            ${isAdmin ? `<button class="inv-resend-btn" style="background:none;border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:11px;font-weight:700;padding:2px 8px;cursor:pointer;font-family:Outfit,sans-serif">🔄 Erneut</button>
+            <button class="inv-cancel-btn" style="background:none;border:1px solid var(--danger);border-radius:6px;color:var(--danger);font-size:11px;font-weight:700;padding:2px 8px;cursor:pointer;font-family:Outfit,sans-serif">✕ Zurückziehen</button>` : ''}
+          </div>
         </div>
-      </div>
-    </div>`).join('') : '';
+      </div>`;
+    }).join('') : '';
 
   document.getElementById('share-members-list').innerHTML = memberHtml + pendingHtml;
+
+  // Event Delegation für Erneut-senden + Zurückziehen (data-Attribute statt inline onclick)
+  document.getElementById('share-members-list').querySelectorAll('.pending-inv-row').forEach(row => {
+    const id    = row.dataset.invId;
+    const email = row.dataset.invEmail;
+    const role  = row.dataset.invRole;
+    row.querySelector('.inv-resend-btn')?.addEventListener('click', () => resendInvitation(id, email, role));
+    row.querySelector('.inv-cancel-btn')?.addEventListener('click', () => cancelInvitation(id, email));
+  });
 
   // Aktivitäts-Verlauf
   const actHtml = activity.length ? activity.map(a => `
