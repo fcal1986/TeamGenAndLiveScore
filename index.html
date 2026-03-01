@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-G';
+const BUILD_VERSION = 'v2026-03-01-H';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2647,16 +2647,18 @@ async function initApp() {
       }
     } else if (event === 'SIGNED_OUT') {
       const timeSinceLogin = _lastLoginTime ? Math.round((Date.now() - _lastLoginTime) / 1000) : null;
-      // signInWithOtp (für Einladungs-E-Mail) löst manchmal SIGNED_OUT aus → ignorieren
-      // wenn der User gerade aktiv war (< 5s nach einer App-Aktion)
+      // SIGNED_OUT kurz nach Einladungs-OTP → ignorieren, Token retten
+      const msSinceOtp = window._lastInviteOtpTime ? Date.now() - window._lastInviteOtpTime : 99999;
       const lastAction = window._lastActionTime || 0;
       const secsSinceAction = (Date.now() - lastAction) / 1000;
-      if (secsSinceAction < 10) {
-        dbg('→ SIGNED_OUT ignoriert (nach signInWithOtp, ' + Math.round(secsSinceAction) + 's nach Aktion)', 'warn');
-        // Token versuchen zu retten
+      if (msSinceOtp < 8000 || secsSinceAction < 10) {
+        dbg('→ SIGNED_OUT ignoriert (Einladungs-OTP ' + Math.round(msSinceOtp/1000) + 's ago)', 'warn');
+        window._lastInviteOtpTime = 0;
+        // Token retten: aus Supabase Session holen
         try {
           const { data: { session: s } } = await _sb.auth.getSession();
           if (s?.access_token) { _currentToken = s.access_token; dbg('Token gerettet ✅', 'ok'); }
+          else dbg('Token konnte nicht gerettet werden', 'warn');
         } catch(e) {}
         return;
       }
@@ -2709,13 +2711,23 @@ async function initApp() {
 async function _shRest(method, table, params, body) {
   let token = _getToken();
   if (!token) {
-    dbg('shRest: kein Token im Cache, hole frischen…', 'warn');
+    dbg('shRest: kein Token → warte auf Re-Login (max 8s)…', 'warn');
+    // Warte bis onAuthStateChange wieder einen Token setzt (max 8 Versuche)
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      token = _getToken();
+      if (token) { dbg('shRest: Token nach ' + (i+1) + 's verfügbar', 'ok'); break; }
+    }
+  }
+  if (!token) {
+    // Letzter Versuch: frische Session via getSession()
+    dbg('shRest: hole Session via getSession()…', 'warn');
     try {
       const { data: { session } } = await _sb.auth.getSession();
       if (session?.access_token) { token = session.access_token; _currentToken = token; }
     } catch(e) { dbg('shRest: getSession Fehler: ' + e.message, 'err'); }
   }
-  if (!token) { dbg('shRest: kein Token → abgebrochen', 'err'); return null; }
+  if (!token) { dbg('shRest: kein Token nach Warten → abgebrochen', 'err'); return null; }
   // Token-Claim prüfen
   try {
     const p = JSON.parse(atob(token.split('.')[1]));
@@ -3000,6 +3012,21 @@ async function sendInvitation() {
   const list = getCurrentList();
   if (!list) return;
 
+  // Token sicherstellen BEVOR wir anfangen
+  if (!_getToken()) {
+    toast('⏳ Bitte kurz warten, Verbindung wird wiederhergestellt…');
+    dbg('sendInvitation: warte auf Token…', 'warn');
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      if (_getToken()) { dbg('Token nach ' + (i+1) + 's OK', 'ok'); break; }
+    }
+    if (!_getToken()) {
+      toast('❌ Keine Verbindung – bitte erneut einloggen');
+      return;
+    }
+  }
+  dbg('sendInvitation: Token OK (' + (_getToken()||'').substring(0,20) + '…)', 'info');
+
   // Einladen-Button deaktivieren während Request läuft
   const btn = document.querySelector('#modal-share-group .btn-primary');
   if (btn) btn.disabled = true;
@@ -3114,6 +3141,7 @@ async function sendInvitation() {
     const appUrl = 'https://fcal1986.github.io/TeamGenAndLiveScore/?invite=' + invId;
     try {
       // Schritt 1: Bestehenden User ansprechen (kein neuer Account)
+      window._lastInviteOtpTime = Date.now(); // SIGNED_OUT danach ignorieren
       const { error: otpError } = await _sb.auth.signInWithOtp({
         email,
         options: {
