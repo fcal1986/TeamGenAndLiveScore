@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-B';
+const BUILD_VERSION = 'v2026-03-01-C';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2681,8 +2681,21 @@ async function initApp() {
 
 // ── REST-Helpers für Sharing-Tabellen ──
 async function _shRest(method, table, params, body) {
-  const token = _getToken();
-  if (!token) return null;
+  let token = _getToken();
+  // Kein Token → frischen Token via getSession holen
+  if (!token) {
+    dbg('shRest: kein Token im Cache, hole frischen…', 'warn');
+    try {
+      const { data: { session } } = await _sb.auth.getSession();
+      if (session?.access_token) {
+        token = session.access_token;
+        _currentToken = token;
+        dbg('shRest: frischer Token geholt', 'ok');
+      }
+    } catch(e) { dbg('shRest: getSession Fehler: ' + e.message, 'err'); }
+  }
+  if (!token) { dbg('shRest: kein Token → abgebrochen', 'err'); return null; }
+
   let url = SUPABASE_URL + '/rest/v1/' + table;
   if (params) url += '?' + params;
   const headers = {
@@ -2698,6 +2711,21 @@ async function _shRest(method, table, params, body) {
     if (!res.ok) {
       const t = await res.text().catch(()=>'');
       dbg('shRest ' + method + ' ' + table + ': HTTP ' + res.status + ' ' + t.substring(0,80), 'err');
+
+      // Bei 401: Token abgelaufen → einmal refreshen und retry
+      if (res.status === 401) {
+        dbg('shRest: 401 → Token refresh + retry…', 'warn');
+        try {
+          const { data: { session } } = await _sb.auth.getSession();
+          if (session?.access_token) {
+            _currentToken = session.access_token;
+            headers['Authorization'] = 'Bearer ' + _currentToken;
+            const res2 = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+            if (res2.ok) return res2.status === 204 ? true : res2.json().catch(()=>null);
+            dbg('shRest retry fehlgeschlagen: HTTP ' + res2.status, 'err');
+          }
+        } catch(e2) { dbg('shRest retry Fehler: ' + e2.message, 'err'); }
+      }
       return null;
     }
     if (res.status === 204) return true;
