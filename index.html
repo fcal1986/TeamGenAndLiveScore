@@ -948,6 +948,41 @@
   .user-menu-btn:hover { background: var(--surface2); color: var(--text); }
   .user-menu-btn.danger { color: var(--danger); }
   .user-menu-btn.danger:hover { background: rgba(239,68,68,0.1); }
+
+  /* ── Sharing & Invitations ── */
+  .shared-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: rgba(99,102,241,0.15); color: var(--accent);
+    border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;
+  }
+  .invite-banner {
+    margin: 8px 16px; background: rgba(99,102,241,0.1);
+    border: 1px solid rgba(99,102,241,0.3); border-radius: 14px;
+    padding: 14px 16px; display: flex; align-items: flex-start; gap: 12px;
+  }
+  .invite-banner-icon { font-size: 28px; flex-shrink: 0; }
+  .invite-banner-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+  .invite-banner-sub   { font-size: 12px; color: var(--text2); margin-bottom: 10px; }
+  .invite-banner-actions { display: flex; gap: 8px; }
+  .btn-accept { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .btn-decline{ background: var(--surface2); color: var(--text2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  .member-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .member-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; flex-shrink: 0; }
+  .member-info { flex: 1; }
+  .member-email { font-size: 13px; color: var(--text); font-weight: 600; }
+  .member-role  { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .role-badge { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+  .role-badge.admin  { background: rgba(245,158,11,0.15); color: #f59e0b; }
+  .role-badge.reader { background: rgba(100,116,139,0.15); color: var(--text2); }
+  .activity-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .activity-dot  { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 5px; }
+  .activity-text { font-size: 13px; color: var(--text2); line-height: 1.4; }
+  .activity-time { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .delete-vote-bar { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-top: 12px; }
+  .delete-vote-title { font-size: 13px; font-weight: 700; color: var(--danger); margin-bottom: 8px; }
+  .share-btn { background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--text2); padding: 6px 12px; font-size: 13px; font-family: Outfit,sans-serif; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .share-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .reader-lock { opacity: 0.4; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -1102,6 +1137,7 @@
     <button class="btn btn-primary btn-full btn-cta-pulse" onclick="loadDemoData()" style="margin-bottom:10px">⚡ Demo starten – sofort losspielen</button>
     <button class="btn btn-secondary btn-full" onclick="openModal('modal-add-list')">+ Eigene Gruppe erstellen</button>
   </div>
+  <div id="invitations-container"></div>
   <div id="lists-container"></div>
 </div>
 
@@ -1110,6 +1146,7 @@
   <div class="header">
     <button class="back-btn" onclick="goBack('screen-lists')" aria-label="Zurück">‹</button>
     <h1 id="list-detail-title">Gruppe</h1>
+    <button class="share-btn" id="share-group-btn" onclick="openShareModal()" title="Gruppe teilen">👥 Teilen</button>
     <button class="btn-icon btn btn-secondary" onclick="openModal('modal-rename-list')" title="Umbenennen">✏️</button>
   </div>
   <div class="tabs">
@@ -1324,6 +1361,50 @@
 
 <!-- ===================== MODALS ===================== -->
 <!-- Add List -->
+
+<!-- ═══ MODAL: Gruppe teilen ═══ -->
+<div class="modal-overlay" id="modal-share-group" onclick="closeModalOutside(event,'modal-share-group')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">👥 Gruppe teilen</div>
+    <div id="share-members-list" style="margin-bottom:16px"></div>
+    <div style="font-size:12px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Einladen</div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input id="invite-email-input" class="form-group" placeholder="E-Mail-Adresse" type="email"
+        style="flex:1;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:Outfit;font-size:14px;outline:none">
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <select id="invite-role-select" style="flex:1;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:Outfit;font-size:14px;outline:none">
+        <option value="reader">👁 Leser – kann nur schauen</option>
+        <option value="admin">⚡ Admin – kann alles ändern</option>
+      </select>
+      <button class="btn btn-primary" onclick="sendInvitation()" style="padding:10px 18px;font-size:14px">Einladen</button>
+    </div>
+    <div id="share-activity-section">
+      <div style="font-size:12px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Verlauf</div>
+      <div id="share-activity-list"></div>
+    </div>
+    <div id="share-delete-vote" class="delete-vote-bar" style="display:none">
+      <div class="delete-vote-title">🗑 Gruppe löschen</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:10px" id="share-delete-status"></div>
+      <button class="btn btn-danger btn-full" onclick="voteDeleteSharedGroup()">Meiner Meinung nach löschen</button>
+    </div>
+    <button class="btn btn-secondary btn-full" onclick="closeModal('modal-share-group')" style="margin-top:8px">Schließen</button>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Einladung annehmen ═══ -->
+<div class="modal-overlay" id="modal-accept-invite" onclick="closeModalOutside(event,'modal-accept-invite')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div style="text-align:center;font-size:40px;margin-bottom:8px">🎉</div>
+    <div class="modal-title" id="accept-invite-title">Einladung</div>
+    <div style="font-size:14px;color:var(--text2);text-align:center;margin-bottom:20px" id="accept-invite-sub"></div>
+    <button class="btn btn-primary btn-full" onclick="acceptInvitation()" style="margin-bottom:8px">✅ Einladung annehmen</button>
+    <button class="btn btn-secondary btn-full" onclick="declineInvitation()">Ablehnen</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-add-list" onclick="closeModalOutside(event,'modal-add-list')">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -1719,6 +1800,14 @@
     if (search && search.includes('code=')) {
       dbg('PKCE code in URL erkannt: ' + search.substring(0, 60), 'ok');
     }
+    // Einladungs-Link: ?invite=UUID
+    const inviteParam = new URLSearchParams(search).get('invite');
+    if (inviteParam) {
+      dbg('Einladungs-Link erkannt: ' + inviteParam, 'ok');
+      localStorage.setItem('_pendingInviteId', inviteParam);
+      // URL sauber machen ohne Reload
+      history.replaceState({}, '', window.location.pathname);
+    }
 
     // window.gonative — mit Retry (Median injiziert async)
     function checkBridge(attempt) {
@@ -1769,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-02-28-Q';
+const BUILD_VERSION = 'v2026-03-01-A';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -1792,6 +1881,11 @@ let state = {
   currentTab: 'actions',
   activeTournamentId: null
 };
+
+// Geteilte Gruppen (aus Supabase, nicht in user_data gespeichert)
+let _sharedGroups = [];       // [{id, name, role, data, members, ...}]
+let _pendingInvitations = []; // Offene Einladungen für diesen User
+let _currentInvite = null;    // Aktuell angezeigte Einladung
 
 function getList(id) { return state.lists.find(l => l.id === id); }
 function getCurrentList() { return getList(state.currentListId); }
@@ -1907,6 +2001,15 @@ async function loadFromSupabase(userId) {
 // save() – sofort lokal, nach 1.5s in Cloud
 function save() {
   saveLocal();
+  const list = getCurrentList();
+  // Geteilte Gruppe? → shared_groups updaten (nur Admins)
+  const isShared = list?._sharedGroupId || (_sharedGroups && _sharedGroups.find(g => g.id === list?.id));
+  const sharedId = list?._sharedGroupId || (isShared && list?.id);
+  if (sharedId && _currentToken) {
+    if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+    _saveDebounceTimer = setTimeout(() => saveSharedGroup(sharedId), 1500);
+    return;
+  }
   if (!_sb || !_currentUserId) return;
   if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
   setSyncStatus('saving');
@@ -1979,6 +2082,34 @@ async function _doLoginAndShow(user, token) {
     renderLists();
     showScreen('screen-lists');
     dbg('✅ App bereit: ' + user.email, 'ok');
+    // Gespeicherte Einladung aus URL prüfen
+    const pendingInvite = localStorage.getItem('_pendingInviteId');
+    if (pendingInvite) {
+      localStorage.removeItem('_pendingInviteId');
+      dbg('Verarbeite gespeicherte Einladung: ' + pendingInvite, 'info');
+      // Kurz warten bis loadSharedGroups fertig ist, dann Einladung zeigen
+      setTimeout(async () => {
+        const inv = _pendingInvitations.find(i => i.id === pendingInvite);
+        if (inv) showAcceptModal(inv.id);
+        else {
+          // Direkt aus DB laden
+          const rows = await _shRest('GET', 'group_invitations',
+            'id=eq.' + encodeURIComponent(pendingInvite) + '&select=id,group_id,role,invited_by', null);
+          if (rows && rows[0]) {
+            const gnames = await _shRest('GET', 'shared_groups',
+              'id=eq.' + encodeURIComponent(rows[0].group_id) + '&select=id,name', null);
+            _currentInvite = { ...rows[0], groupName: gnames?.[0]?.name || 'Gruppe' };
+            document.getElementById('accept-invite-title').textContent = 'Einladung: ' + _currentInvite.groupName;
+            document.getElementById('accept-invite-sub').textContent =
+              'Du wirst als ' + (_currentInvite.role === 'admin' ? 'Admin' : 'Leser') + ' hinzugefügt.';
+            openModal('modal-accept-invite');
+          }
+        }
+      }, 1500);
+    }
+    // Email setzen + geteilte Gruppen laden
+    _setUserEmail(user.email);
+    loadSharedGroups(); // async, im Hintergrund
   } catch(e) {
     dbg('_doLoginAndShow Fehler: ' + e.message, 'err');
     try { showApp(user); renderLists(); showScreen('screen-lists'); } catch(_) {}
@@ -2543,6 +2674,436 @@ async function initApp() {
   }
 }
 
+
+// ╔══════════════════════════════════════════════════════╗
+// ║  SHARING: Gruppen zwischen Usern teilen              ║
+// ╚══════════════════════════════════════════════════════╝
+
+// ── REST-Helpers für Sharing-Tabellen ──
+async function _shRest(method, table, params, body) {
+  const token = _getToken();
+  if (!token) return null;
+  let url = SUPABASE_URL + '/rest/v1/' + table;
+  if (params) url += '?' + params;
+  const headers = {
+    'apikey': SUPABASE_ANON,
+    'Authorization': 'Bearer ' + token,
+    'Content-Type': 'application/json',
+  };
+  if (method === 'POST' || method === 'PATCH') {
+    headers['Prefer'] = 'return=representation';
+  }
+  try {
+    const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    if (!res.ok) {
+      const t = await res.text().catch(()=>'');
+      dbg('shRest ' + method + ' ' + table + ': HTTP ' + res.status + ' ' + t.substring(0,80), 'err');
+      return null;
+    }
+    if (res.status === 204) return true;
+    return res.json().catch(()=>null);
+  } catch(e) {
+    dbg('shRest Fehler: ' + e.message, 'err');
+    return null;
+  }
+}
+
+function _shLogActivity(groupId, action, detail) {
+  if (!_currentUserId || !groupId) return;
+  _shRest('POST', 'group_activity', null, {
+    group_id: groupId,
+    user_id: _currentUserId,
+    user_email: _currentUserEmail || '',
+    action, detail
+  });
+}
+
+let _currentUserEmail = null;
+function _setUserEmail(email) { _currentUserEmail = email; }
+
+// ── Geteilte Gruppen laden ──
+async function loadSharedGroups() {
+  if (!_currentUserId || !_currentToken) return;
+  dbg('Lade geteilte Gruppen…', 'info');
+  try {
+    // Meine Mitgliedschaften laden
+    const members = await _shRest('GET',
+      'group_members',
+      'user_id=eq.' + encodeURIComponent(_currentUserId) + '&select=group_id,role',
+      null);
+    if (!members || members.length === 0) {
+      _sharedGroups = [];
+      renderLists();
+      return;
+    }
+    // Gruppen-Daten laden
+    const ids = members.map(m => m.group_id);
+    const groups = await _shRest('GET',
+      'shared_groups',
+      'id=in.(' + ids.map(id => '"'+id+'"').join(',') + ')&select=id,name,data,updated_at,updated_by',
+      null);
+    if (!groups) return;
+    _sharedGroups = groups.map(g => ({
+      ...g,
+      role: members.find(m => m.group_id === g.id)?.role || 'reader',
+      // NEU-Badge wenn jemand anderes zuletzt geändert hat
+      _hasNew: g.updated_by && g.updated_by !== _currentUserId
+    }));
+    dbg('Geteilte Gruppen: ' + _sharedGroups.length, 'ok');
+    renderLists();
+    // Einladungen prüfen
+    await loadPendingInvitations();
+  } catch(e) {
+    dbg('loadSharedGroups Fehler: ' + e.message, 'err');
+  }
+}
+
+// ── Offene Einladungen laden ──
+async function loadPendingInvitations() {
+  if (!_currentUserEmail || !_currentToken) return;
+  const invites = await _shRest('GET',
+    'group_invitations',
+    'email=eq.' + encodeURIComponent(_currentUserEmail) + '&accepted_at=is.null&select=id,group_id,role,invited_by',
+    null);
+  if (!invites || invites.length === 0) {
+    _pendingInvitations = [];
+    renderInvitationBanners();
+    return;
+  }
+  // Gruppen-Namen für Einladungen laden
+  const gids = invites.map(i => i.group_id);
+  const gnames = await _shRest('GET',
+    'shared_groups',
+    'id=in.(' + gids.map(id => '"'+id+'"').join(',') + ')&select=id,name',
+    null);
+  _pendingInvitations = invites.map(inv => ({
+    ...inv,
+    groupName: gnames?.find(g => g.id === inv.group_id)?.name || 'Unbekannte Gruppe'
+  }));
+  dbg('Offene Einladungen: ' + _pendingInvitations.length, 'ok');
+  renderInvitationBanners();
+}
+
+// ── Einladungs-Banner rendern ──
+function renderInvitationBanners() {
+  const c = document.getElementById('invitations-container');
+  if (!c) return;
+  if (!_pendingInvitations.length) { c.innerHTML = ''; return; }
+  c.innerHTML = _pendingInvitations.map(inv => `
+    <div class="invite-banner" id="inv-banner-${inv.id}">
+      <div class="invite-banner-icon">🎉</div>
+      <div style="flex:1">
+        <div class="invite-banner-title">Einladung: ${inv.groupName}</div>
+        <div class="invite-banner-sub">Rolle: ${inv.role === 'admin' ? '⚡ Admin' : '👁 Leser'}</div>
+        <div class="invite-banner-actions">
+          <button class="btn-accept" onclick="showAcceptModal('${inv.id}')">Annehmen</button>
+          <button class="btn-decline" onclick="declineInvitationById('${inv.id}')">Ablehnen</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Einladung annehmen ──
+function showAcceptModal(inviteId) {
+  _currentInvite = _pendingInvitations.find(i => i.id === inviteId);
+  if (!_currentInvite) return;
+  document.getElementById('accept-invite-title').textContent = 'Einladung: ' + _currentInvite.groupName;
+  document.getElementById('accept-invite-sub').textContent =
+    'Du wirst als ' + (_currentInvite.role === 'admin' ? 'Admin' : 'Leser') + ' hinzugefügt.';
+  openModal('modal-accept-invite');
+}
+
+async function acceptInvitation() {
+  if (!_currentInvite) return;
+  closeModal('modal-accept-invite');
+  const inv = _currentInvite;
+  _currentInvite = null;
+  try {
+    // Mitglied hinzufügen
+    await _shRest('POST', 'group_members', null, {
+      group_id: inv.group_id,
+      user_id: _currentUserId,
+      email: _currentUserEmail,
+      role: inv.role,
+      invited_by: inv.invited_by
+    });
+    // Einladung als angenommen markieren
+    await _shRest('PATCH', 'group_invitations',
+      'id=eq.' + inv.id,
+      { accepted_at: new Date().toISOString() });
+    _shLogActivity(inv.group_id, 'joined', _currentUserEmail + ' ist beigetreten');
+    toast('✅ Gruppe "' + inv.groupName + '" beigetreten!');
+    _pendingInvitations = _pendingInvitations.filter(i => i.id !== inv.id);
+    renderInvitationBanners();
+    await loadSharedGroups();
+  } catch(e) {
+    toast('Fehler beim Beitreten: ' + e.message);
+  }
+}
+
+async function declineInvitationById(inviteId) {
+  await _shRest('PATCH', 'group_invitations',
+    'id=eq.' + inviteId,
+    { accepted_at: '1970-01-01T00:00:00Z' }); // als abgelehnt markieren
+  _pendingInvitations = _pendingInvitations.filter(i => i.id !== inviteId);
+  renderInvitationBanners();
+  toast('Einladung abgelehnt');
+}
+
+function declineInvitation() {
+  if (_currentInvite) declineInvitationById(_currentInvite.id);
+  closeModal('modal-accept-invite');
+  _currentInvite = null;
+}
+
+// ── Share Modal öffnen ──
+async function openShareModal() {
+  const list = getCurrentList();
+  if (!list) return;
+
+  // Ist diese Gruppe bereits geteilt?
+  const shared = _sharedGroups.find(g => g.id === state.currentListId);
+  const isOwner = !shared; // eigene Gruppe = noch nicht geteilt oder Creator
+
+  // Mitglieder laden wenn bereits geteilt
+  let members = [];
+  let activity = [];
+  if (list._sharedGroupId || shared) {
+    const gid = list._sharedGroupId || state.currentListId;
+    const mems = await _shRest('GET',
+      'group_members',
+      'group_id=eq.' + encodeURIComponent(gid) + '&select=user_id,email,role,joined_at',
+      null);
+    members = mems || [];
+    const acts = await _shRest('GET',
+      'group_activity',
+      'group_id=eq.' + encodeURIComponent(gid) + '&order=created_at.desc&limit=10',
+      null);
+    activity = acts || [];
+  }
+
+  // Mitglieder rendern
+  const memberHtml = members.length ? members.map(m => `
+    <div class="member-row">
+      <div class="member-avatar">${(m.email||'?')[0].toUpperCase()}</div>
+      <div class="member-info">
+        <div class="member-email">${m.email}</div>
+        <div class="member-role"><span class="role-badge ${m.role}">${m.role === 'admin' ? '⚡ Admin' : '👁 Leser'}</span>
+        ${m.user_id === _currentUserId ? ' · Du' : ''}
+        ${(list._sharedGroupId || shared) && members.find(x=>x.user_id===_currentUserId)?.role==='admin' && m.user_id!==_currentUserId ?
+          `<button onclick="toggleMemberRole('${list._sharedGroupId || state.currentListId}','${m.user_id}','${m.role}')" style="margin-left:8px;background:none;border:none;color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">${m.role==='admin'?'→ Leser':'→ Admin'}</button>
+           <button onclick="removeMember('${list._sharedGroupId || state.currentListId}','${m.user_id}')" style="margin-left:4px;background:none;border:none;color:var(--danger);font-size:11px;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">Entfernen</button>`
+          : ''}
+        </div>
+      </div>
+    </div>`).join('') : '<div style="color:var(--text3);font-size:13px;padding:8px 0">Noch keine Mitglieder</div>';
+
+  document.getElementById('share-members-list').innerHTML = memberHtml;
+
+  // Aktivitäts-Verlauf
+  const actHtml = activity.length ? activity.map(a => `
+    <div class="activity-item">
+      <div class="activity-dot"></div>
+      <div>
+        <div class="activity-text">${a.action}: ${a.detail || ''}</div>
+        <div class="activity-time">${new Date(a.created_at).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
+      </div>
+    </div>`).join('') : '<div style="color:var(--text3);font-size:12px;padding:4px 0">Noch keine Aktivität</div>';
+  document.getElementById('share-activity-list').innerHTML = actHtml;
+
+  // Löschen-Abstimmung (nur für geteilte Gruppen)
+  const deleteVoteEl = document.getElementById('share-delete-vote');
+  if (shared && members.find(m => m.user_id === _currentUserId)?.role === 'admin') {
+    deleteVoteEl.style.display = 'block';
+    const adminCount = members.filter(m => m.role === 'admin').length;
+    document.getElementById('share-delete-status').textContent =
+      'Alle ' + adminCount + ' Admin(s) müssen zustimmen.';
+  } else {
+    deleteVoteEl.style.display = 'none';
+  }
+
+  openModal('modal-share-group');
+}
+
+// ── Einladung senden ──
+async function sendInvitation() {
+  const email = (document.getElementById('invite-email-input').value || '').trim().toLowerCase();
+  const role  = document.getElementById('invite-role-select').value;
+  if (!email || !email.includes('@')) { toast('Bitte gültige E-Mail eingeben'); return; }
+
+  const list = getCurrentList();
+  if (!list) return;
+
+  // Gruppe zuerst in shared_groups anlegen wenn noch nicht geteilt
+  let groupId = list._sharedGroupId || state.currentListId;
+  const isNewShare = !list._sharedGroupId;
+
+  if (isNewShare) {
+    dbg('Erstelle shared_group…', 'info');
+    const created = await _shRest('POST', 'shared_groups', null, {
+      id: groupId,
+      name: list.name,
+      created_by: _currentUserId,
+      data: { _v: 2, persons: list.persons, history: list.history, tournaments: list.tournaments }
+    });
+    if (!created) { toast('Fehler beim Erstellen der geteilten Gruppe'); return; }
+    // Creator als Admin hinzufügen
+    await _shRest('POST', 'group_members', null, {
+      group_id: groupId,
+      user_id: _currentUserId,
+      email: _currentUserEmail,
+      role: 'admin'
+    });
+    // Liste als "geteilt" markieren
+    list._sharedGroupId = groupId;
+    save();
+    dbg('shared_group erstellt: ' + groupId, 'ok');
+  }
+
+  // Einladung erstellen
+  const inv = await _shRest('POST', 'group_invitations', null, {
+    group_id: groupId,
+    email, role,
+    invited_by: _currentUserId
+  });
+  if (!inv) { toast('Fehler beim Einladen (bereits eingeladen?)'); return; }
+
+  // Magic Link senden via Supabase Auth (Fehler ignorieren – User evtl. bereits registriert)
+  try {
+    await _sb.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: 'https://fcal1986.github.io/TeamGenAndLiveScore/?invite=' + (inv[0]?.id || inv?.id || ''),
+        data: { invited_to: list.name, role }
+      }
+    });
+  } catch(e) {
+    dbg('Magic Link Warnung (kein Fehler): ' + e.message, 'warn');
+  }
+
+  _shLogActivity(groupId, 'eingeladen', email + ' als ' + (role === 'admin' ? 'Admin' : 'Leser'));
+  toast('✅ Einladung an ' + email + ' gesendet!');
+  document.getElementById('invite-email-input').value = '';
+  await loadSharedGroups();
+  await openShareModal(); // Modal neu laden
+}
+
+// ── Rolle ändern ──
+async function toggleMemberRole(groupId, userId, currentRole) {
+  const newRole = currentRole === 'admin' ? 'reader' : 'admin';
+  await _shRest('PATCH', 'group_members',
+    'group_id=eq.' + encodeURIComponent(groupId) + '&user_id=eq.' + encodeURIComponent(userId),
+    { role: newRole });
+  _shLogActivity(groupId, 'rolle-geändert', userId + ' → ' + newRole);
+  toast('Rolle geändert: ' + (newRole === 'admin' ? 'Admin' : 'Leser'));
+  await openShareModal();
+}
+
+// ── Mitglied entfernen ──
+async function removeMember(groupId, userId) {
+  await _shRest('DELETE', 'group_members',
+    'group_id=eq.' + encodeURIComponent(groupId) + '&user_id=eq.' + encodeURIComponent(userId),
+    null);
+  _shLogActivity(groupId, 'entfernt', userId);
+  toast('Mitglied entfernt');
+  await openShareModal();
+}
+
+// ── Geteilte Gruppe öffnen ──
+async function openSharedGroup(groupId) {
+  const sg = _sharedGroups.find(g => g.id === groupId);
+  if (!sg) return;
+  // Frische Daten laden
+  const fresh = await _shRest('GET', 'shared_groups',
+    'id=eq.' + encodeURIComponent(groupId) + '&select=id,name,data,updated_at',
+    null);
+  if (fresh && fresh[0]) {
+    sg.data = fresh[0].data;
+    sg._hasNew = false;
+  }
+  // Temporär in state laden (read-only wenn Leser)
+  const tempList = {
+    id: groupId,
+    name: sg.name,
+    _sharedGroupId: groupId,
+    _sharedRole: sg.role,
+    ...(sg.data || {}),
+    persons: sg.data?.persons || [],
+    history: sg.data?.history || [],
+    tournaments: sg.data?.tournaments || []
+  };
+  // In state einfügen (temporär, wird nicht gespeichert)
+  const existing = state.lists.findIndex(l => l.id === groupId);
+  if (existing >= 0) state.lists[existing] = tempList;
+  else state.lists.push(tempList);
+  state.currentListId = groupId;
+
+  // Reader-Lock: Eingaben deaktivieren
+  const isReader = sg.role === 'reader';
+  document.getElementById('list-detail-title').textContent = sg.name;
+  showScreen('screen-list-detail');
+
+  // Felder sperren/entsperren je nach Rolle
+  window._currentSharedRole = sg.role;
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#tab-content-persons input, #tab-content-persons button:not(.back-btn), #tab-content-actions button');
+    inputs.forEach(el => {
+      if (isReader) { el.classList.add('reader-lock'); el.disabled = true; }
+      else { el.classList.remove('reader-lock'); el.disabled = false; }
+    });
+    // Share-Button immer sichtbar
+    const shareBtn = document.getElementById('share-group-btn');
+    if (shareBtn) shareBtn.style.display = 'flex';
+    // Löschen-Button für Leser verstecken
+    document.querySelectorAll('.danger-list-btn').forEach(b => b.style.display = isReader ? 'none' : '');
+  }, 200);
+}
+
+// ── Geteilte Gruppe speichern (sync zur DB) ──
+async function saveSharedGroup(groupId) {
+  const list = state.lists.find(l => l.id === groupId);
+  if (!list || !_currentToken) return;
+  const sg = _sharedGroups.find(g => g.id === groupId);
+  if (!sg || sg.role !== 'admin') return; // nur Admins dürfen speichern
+  const data = { _v: 2, persons: list.persons, history: list.history, tournaments: list.tournaments };
+  await _shRest('PATCH', 'shared_groups',
+    'id=eq.' + encodeURIComponent(groupId),
+    { data, updated_at: new Date().toISOString(), updated_by: _currentUserId });
+  _shLogActivity(groupId, 'bearbeitet', 'Daten aktualisiert');
+  dbg('Shared group saved: ' + groupId, 'ok');
+}
+
+// ── Geteilte Gruppe löschen (alle Admins müssen zustimmen) ──
+async function voteDeleteSharedGroup() {
+  const list = getCurrentList();
+  const groupId = list?._sharedGroupId || state.currentListId;
+  if (!groupId) return;
+  // Eintrag in activity als "Lösch-Stimme"
+  await _shLogActivity(groupId, 'lösch-stimme', _currentUserEmail);
+  const members = await _shRest('GET', 'group_members',
+    'group_id=eq.' + encodeURIComponent(groupId) + '&role=eq.admin',
+    null);
+  const votes = await _shRest('GET', 'group_activity',
+    'group_id=eq.' + encodeURIComponent(groupId) + '&action=eq.lösch-stimme',
+    null);
+  const adminCount = (members || []).length;
+  const voteCount  = (votes   || []).length;
+  if (voteCount >= adminCount) {
+    // Alle Admins haben gestimmt → löschen
+    await _shRest('DELETE', 'shared_groups', 'id=eq.' + encodeURIComponent(groupId), null);
+    state.lists = state.lists.filter(l => l.id !== groupId);
+    _sharedGroups = _sharedGroups.filter(g => g.id !== groupId);
+    save();
+    renderLists();
+    closeModal('modal-share-group');
+    goBack('screen-lists');
+    toast('Gruppe gelöscht');
+  } else {
+    toast('Deine Stimme wurde gezählt (' + voteCount + '/' + adminCount + ')');
+    closeModal('modal-share-group');
+  }
+}
+
 // Globaler Fehler-Handler: sicherstellen dass Spinner nie ewig hängt
 window.addEventListener('unhandledrejection', (e) => {
   dbg('Unhandled Promise Rejection: ' + (e.reason?.message || e.reason), 'err');
@@ -2607,12 +3168,36 @@ function renderLists() {
   const container = document.getElementById('lists-container');
   const empty = document.getElementById('lists-empty');
   const gc = document.getElementById('groups-count');
-  if (gc) gc.textContent = state.lists.length ? state.lists.length + ' Gruppen' : '';
-  if (!state.lists.length) {
+  const total = state.lists.length + _sharedGroups.length;
+  if (gc) gc.textContent = total ? total + ' Gruppen' : '';
+  if (!total) {
     empty.style.display = 'block'; container.innerHTML = ''; return;
   }
   empty.style.display = 'none';
-  container.innerHTML = state.lists.map(l => {
+
+  // Geteilte Gruppen rendern
+  const sharedHtml = _sharedGroups.map(g => {
+    const data = g.data || {};
+    const persons = data.persons || [];
+    const history = data.history || [];
+    const active = persons.filter(p=>p.active!==false).length;
+    const whoStr = persons.length===0 ? 'Noch niemand dabei' : active + '/' + persons.length + ' dabei';
+    const newBadge = g._hasNew ? '<span style="background:var(--accent);color:#fff;border-radius:6px;padding:1px 7px;font-size:10px;font-weight:800;margin-left:6px">NEU</span>' : '';
+    return `<div class="list-nav-item" onclick="openSharedGroup('${g.id}')" style="margin:0 0 2px">
+      <div class="lni-icon" style="background:rgba(99,102,241,0.15);font-size:22px">🎲</div>
+      <div class="lni-info">
+        <div class="lni-name">${g.name}${newBadge} <span class="shared-badge">👥 ${g.role==='admin'?'Admin':'Leser'}</span></div>
+        <div class="lni-meta">${whoStr} · ${history.length} Einträge</div>
+      </div>
+      <div class="lni-arrow">›</div>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = (sharedHtml ? `<div style="padding:8px 16px 4px;font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.8px">Geteilt mit mir</div>${sharedHtml}<div style="padding:8px 16px 4px;font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.8px">Meine Gruppen</div>` : '');
+
+  if (!state.lists.length) { container.innerHTML += '<div style="padding:12px 16px;color:var(--text3);font-size:14px">Noch keine eigenen Gruppen</div>'; }
+
+  container.innerHTML += state.lists.map(l => {
     const histCount = (l.history||[]).length;
     const active = (l.persons||[]).filter(p=>p.active!==false).length;
     const total = (l.persons||[]).length;
