@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-L';
+const BUILD_VERSION = 'v2026-03-01-M';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2873,7 +2873,7 @@ async function loadPendingInvitations() {
   dbg('Prüfe Einladungen für ' + email + '…', 'info');
   const invites = await _shRest('GET',
     'group_invitations',
-    'email=eq.' + encodeURIComponent(email) + '&accepted_at=is.null&select=id,group_id,role,invited_by',
+    'email=eq.' + encodeURIComponent(email) + '&accepted_at=is.null&select=id,group_id,role,invited_by,group_name',
     null);
   dbg('Einladungen DB-Antwort: ' + JSON.stringify(invites)?.substring(0,80), 'info');
   if (!invites || invites.length === 0) {
@@ -2881,16 +2881,19 @@ async function loadPendingInvitations() {
     renderInvitationBanners();
     return;
   }
-  // Gruppen-Namen für Einladungen laden
-  const gids = invites.map(i => i.group_id);
-  const gnames = await _shRest('GET',
-    'shared_groups',
-    'id=in.(' + gids.map(id => '"'+id+'"').join(',') + ')&select=id,name',
-    null);
-  _pendingInvitations = invites.map(inv => ({
-    ...inv,
-    groupName: gnames?.find(g => g.id === inv.group_id)?.name || 'Unbekannte Gruppe'
+  // Gruppen-Namen direkt aus Einladung lesen (group_name Spalte)
+  // Fallback: shared_groups Query (nur wenn User bereits Mitglied)
+  const invitesWithNames = await Promise.all(invites.map(async inv => {
+    let groupName = inv.group_name; // direkt gespeichert beim Einladen
+    if (!groupName) {
+      // Fallback: direkt aus shared_groups laden
+      const g = await _shRest('GET', 'shared_groups',
+        'id=eq.' + encodeURIComponent(inv.group_id) + '&select=id,name', null);
+      groupName = g?.[0]?.name || 'Spielr Gruppe';
+    }
+    return { ...inv, groupName };
   }));
+  _pendingInvitations = invitesWithNames;
   dbg('Offene Einladungen: ' + _pendingInvitations.length, 'ok');
   renderInvitationBanners();
 }
@@ -3000,7 +3003,10 @@ async function openShareModal() {
   }
 
   // Ausstehende Einladungen laden (noch nicht angenommen)
-  const gidForInv = list._sharedGroupId || state.currentListId;
+  const gidForInv = list._sharedGroupId
+    || _sharedGroups.find(g => g.name === list.name)?.id
+    || state.currentListId;
+  dbg('openShareModal: gidForInv=' + (gidForInv||'null').substring(0,8), 'info');
   const pendingInvs = await _shRest('GET', 'group_invitations',
     'group_id=eq.' + encodeURIComponent(gidForInv) + '&accepted_at=is.null&select=id,email,role,created_at', null) || [];
 
@@ -3201,7 +3207,8 @@ async function sendInvitation() {
     const inv = await _shRest('POST', 'group_invitations', null, {
       group_id: groupId,
       email, role,
-      invited_by: _currentUserId
+      invited_by: _currentUserId,
+      group_name: list.name   // Name direkt speichern → kein RLS-Problem beim Lesen
     });
     if (!inv) { toast('❌ Fehler beim Erstellen der Einladung (groupId: ' + groupId.substring(0,8) + ')'); return; }
 
