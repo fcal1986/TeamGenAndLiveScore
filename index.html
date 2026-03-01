@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-D';
+const BUILD_VERSION = 'v2026-03-01-E';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2000,6 +2000,7 @@ async function loadFromSupabase(userId) {
 
 // save() – sofort lokal, nach 1.5s in Cloud
 function save() {
+  window._lastActionTime = Date.now();
   saveLocal();
   const list = getCurrentList();
   // Geteilte Gruppe? → shared_groups updaten (nur Admins)
@@ -2646,6 +2647,19 @@ async function initApp() {
       }
     } else if (event === 'SIGNED_OUT') {
       const timeSinceLogin = _lastLoginTime ? Math.round((Date.now() - _lastLoginTime) / 1000) : null;
+      // signInWithOtp (für Einladungs-E-Mail) löst manchmal SIGNED_OUT aus → ignorieren
+      // wenn der User gerade aktiv war (< 5s nach einer App-Aktion)
+      const lastAction = window._lastActionTime || 0;
+      const secsSinceAction = (Date.now() - lastAction) / 1000;
+      if (secsSinceAction < 10) {
+        dbg('→ SIGNED_OUT ignoriert (nach signInWithOtp, ' + Math.round(secsSinceAction) + 's nach Aktion)', 'warn');
+        // Token versuchen zu retten
+        try {
+          const { data: { session: s } } = await _sb.auth.getSession();
+          if (s?.access_token) { _currentToken = s.access_token; dbg('Token gerettet ✅', 'ok'); }
+        } catch(e) {}
+        return;
+      }
       if (timeSinceLogin !== null && timeSinceLogin < 30) {
         dbg('⚠️ AUTO-LOGOUT nach ' + timeSinceLogin + 's!', 'err');
         dbg('→ Supabase Dashboard: Auth → Providers → Google → Client ID prüfen', 'err');
@@ -2790,15 +2804,23 @@ async function loadSharedGroups() {
     _sharedGroups = groups.map(g => ({
       ...g,
       role: members.find(m => m.group_id === g.id)?.role || 'reader',
-      // NEU-Badge wenn jemand anderes zuletzt geändert hat
       _hasNew: g.updated_by && g.updated_by !== _currentUserId
     }));
     dbg('Geteilte Gruppen: ' + _sharedGroups.length, 'ok');
+    // _sharedGroupId in lokale Listen zurückschreiben (nach Re-Login)
+    _sharedGroups.forEach(sg => {
+      const local = state.lists.find(l => l._sharedGroupId === sg.id || l.name === sg.name);
+      if (local && !local._sharedGroupId) {
+        local._sharedGroupId = sg.id;
+        dbg('_sharedGroupId wiederhergestellt: ' + sg.id.substring(0,8) + ' → ' + local.name, 'info');
+      }
+    });
     renderLists();
     // Einladungen prüfen
     await loadPendingInvitations();
   } catch(e) {
     dbg('loadSharedGroups Fehler: ' + e.message, 'err');
+    dbg(e.stack?.substring(0,100) || '', 'err');
   }
 }
 
@@ -2978,60 +3000,126 @@ async function sendInvitation() {
   const list = getCurrentList();
   if (!list) return;
 
-  // Gruppe zuerst in shared_groups anlegen wenn noch nicht geteilt
-  // Echte UUID für Supabase (list.id ist kein UUID-Format)
-  let groupId = list._sharedGroupId || null;
-  const isNewShare = !groupId;
+  // Einladen-Button deaktivieren während Request läuft
+  const btn = document.querySelector('#modal-share-group .btn-primary');
+  if (btn) btn.disabled = true;
 
-  if (isNewShare) {
-    groupId = uuidv4();
-    dbg('Erstelle shared_group mit UUID: ' + groupId, 'info');
-    const created = await _shRest('POST', 'shared_groups', null, {
-      id: groupId,
-      name: list.name,
-      created_by: _currentUserId,
-      data: { _v: 2, persons: list.persons, history: list.history, tournaments: list.tournaments }
-    });
-    if (!created) { toast('Fehler beim Erstellen der geteilten Gruppe'); return; }
-    // Creator als Admin hinzufügen
-    await _shRest('POST', 'group_members', null, {
-      group_id: groupId,
-      user_id: _currentUserId,
-      email: _currentUserEmail,
-      role: 'admin'
-    });
-    // Liste als "geteilt" markieren
+  try {
+    // ── Schritt 1: groupId bestimmen ──────────────────────
+    // Priorität: 1. im lokalen State, 2. in _sharedGroups, 3. in Supabase prüfen, 4. neu erstellen
+    let groupId = list._sharedGroupId
+      || _sharedGroups.find(g => g.id === list.id)?.id
+      || null;
+
+    // Supabase prüfen: bin ich bereits Admin einer Gruppe für diese Liste?
+    if (!groupId) {
+      dbg('Prüfe ob shared_group bereits existiert…', 'info');
+      const existing = await _shRest('GET', 'group_members',
+        'user_id=eq.' + encodeURIComponent(_currentUserId) + '&role=eq.admin&select=group_id', null);
+      if (existing && existing.length > 0) {
+        // Prüfe welche davon zum aktuellen Listennamen passt
+        const gids = existing.map(m => '"' + m.group_id + '"').join(',');
+        const groups = await _shRest('GET', 'shared_groups',
+          'id=in.(' + gids + ')&select=id,name', null);
+        const match = groups?.find(g => g.name === list.name);
+        if (match) {
+          groupId = match.id;
+          list._sharedGroupId = groupId;
+          dbg('Bestehende shared_group gefunden: ' + groupId, 'ok');
+        }
+      }
+    }
+
+    // ── Schritt 2: Neue shared_group erstellen falls nötig ──
+    if (!groupId) {
+      groupId = uuidv4();
+      dbg('Erstelle shared_group: ' + groupId, 'info');
+      const created = await _shRest('POST', 'shared_groups', null, {
+        id: groupId,
+        name: list.name,
+        created_by: _currentUserId,
+        data: { _v: 2, persons: list.persons, history: list.history, tournaments: list.tournaments }
+      });
+      if (!created) { toast('❌ Fehler beim Erstellen der geteilten Gruppe'); return; }
+
+      // Creator als Admin eintragen
+      await _shRest('POST', 'group_members', null, {
+        group_id: groupId,
+        user_id: _currentUserId,
+        email: _currentUserEmail,
+        role: 'admin'
+      });
+      dbg('shared_group erstellt: ' + groupId, 'ok');
+      // Sofort in _sharedGroups eintragen damit openShareModal es findet
+      _sharedGroups.push({
+        id: groupId, name: list.name, role: 'admin',
+        data: { persons: list.persons, history: list.history },
+        _hasNew: false
+      });
+    }
+
+    // _sharedGroupId sofort speichern (vor allem anderen!)
     list._sharedGroupId = groupId;
     save();
-    dbg('shared_group erstellt: ' + groupId, 'ok');
-  }
 
-  // Einladung erstellen
-  const inv = await _shRest('POST', 'group_invitations', null, {
-    group_id: groupId,
-    email, role,
-    invited_by: _currentUserId
-  });
-  if (!inv) { toast('Fehler beim Einladen (bereits eingeladen?)'); return; }
+    // ── Schritt 3: Bereits eingeladen? Prüfen ──────────────
+    const existingInv = await _shRest('GET', 'group_invitations',
+      'group_id=eq.' + encodeURIComponent(groupId) + '&email=eq.' + encodeURIComponent(email), null);
+    if (existingInv && existingInv.length > 0 && existingInv[0].accepted_at === null) {
+      toast('⚠️ ' + email + ' wurde bereits eingeladen');
+      return;
+    }
 
-  // Magic Link senden via Supabase Auth (Fehler ignorieren – User evtl. bereits registriert)
-  try {
-    await _sb.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: 'https://fcal1986.github.io/TeamGenAndLiveScore/?invite=' + (inv[0]?.id || inv?.id || ''),
-        data: { invited_to: list.name, role }
-      }
+    // Bereits Mitglied?
+    const existingMember = await _shRest('GET', 'group_members',
+      'group_id=eq.' + encodeURIComponent(groupId) + '&email=eq.' + encodeURIComponent(email), null);
+    if (existingMember && existingMember.length > 0) {
+      toast('⚠️ ' + email + ' ist bereits Mitglied');
+      return;
+    }
+
+    // ── Schritt 4: Einladung erstellen ────────────────────
+    // Falls alte abgelehnte Einladung existiert → löschen + neu erstellen
+    if (existingInv && existingInv.length > 0) {
+      await _shRest('DELETE', 'group_invitations',
+        'group_id=eq.' + encodeURIComponent(groupId) + '&email=eq.' + encodeURIComponent(email), null);
+    }
+
+    dbg('Sende Einladung für groupId: ' + groupId, 'info');
+    const inv = await _shRest('POST', 'group_invitations', null, {
+      group_id: groupId,
+      email, role,
+      invited_by: _currentUserId
     });
-  } catch(e) {
-    dbg('Magic Link Warnung (kein Fehler): ' + e.message, 'warn');
-  }
+    if (!inv) { toast('❌ Fehler beim Erstellen der Einladung (groupId: ' + groupId.substring(0,8) + ')'); return; }
 
-  _shLogActivity(groupId, 'eingeladen', email + ' als ' + (role === 'admin' ? 'Admin' : 'Leser'));
-  toast('✅ Einladung an ' + email + ' gesendet!');
-  document.getElementById('invite-email-input').value = '';
-  await loadSharedGroups();
-  await openShareModal(); // Modal neu laden
+    const invId = inv[0]?.id || inv?.id || '';
+    dbg('Einladung erstellt: ' + invId, 'ok');
+
+    // ── Schritt 5: E-Mail senden ──────────────────────────
+    try {
+      await _sb.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: 'https://fcal1986.github.io/TeamGenAndLiveScore/?invite=' + invId,
+          data: { invited_to: list.name, role }
+        }
+      });
+      dbg('Magic Link E-Mail gesendet an ' + email, 'ok');
+    } catch(e) {
+      dbg('Magic Link Warnung: ' + e.message, 'warn');
+      // Kein Fehler — User ist evtl. bereits registriert, Banner reicht
+    }
+
+    _shLogActivity(groupId, 'eingeladen', email + ' als ' + (role === 'admin' ? 'Admin' : 'Leser'));
+    toast('✅ Einladung an ' + email + ' gesendet!');
+    document.getElementById('invite-email-input').value = '';
+    await loadSharedGroups();
+    await openShareModal();
+
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ── Rolle ändern ──
