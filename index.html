@@ -1858,7 +1858,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-K';
+const BUILD_VERSION = 'v2026-03-01-L';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2677,7 +2677,7 @@ async function initApp() {
       const msSinceOtp = window._lastInviteOtpTime ? Date.now() - window._lastInviteOtpTime : 99999;
       const lastAction = window._lastActionTime || 0;
       const secsSinceAction = (Date.now() - lastAction) / 1000;
-      if (msSinceOtp < 8000 || secsSinceAction < 10) {
+      if (msSinceOtp < 6000) {
         dbg('→ SIGNED_OUT ignoriert (Einladungs-OTP ' + Math.round(msSinceOtp/1000) + 's ago)', 'warn');
         window._lastInviteOtpTime = 0;
         // Token retten: aus Supabase Session holen
@@ -2943,10 +2943,16 @@ async function acceptInvitation() {
       'id=eq.' + inv.id,
       { accepted_at: new Date().toISOString() });
     _shLogActivity(inv.group_id, 'joined', _currentUserEmail + ' ist beigetreten');
-    toast('✅ Gruppe "' + inv.groupName + '" beigetreten!');
     _pendingInvitations = _pendingInvitations.filter(i => i.id !== inv.id);
     renderInvitationBanners();
+    // Gruppen neu laden damit die beigetretene Gruppe sofort erscheint
     await loadSharedGroups();
+    toast('✅ Gruppe "' + (inv.groupName || 'Gruppe') + '" beigetreten!');
+    // Gruppe direkt öffnen
+    const newGroup = _sharedGroups.find(g => g.id === inv.group_id);
+    if (newGroup) {
+      setTimeout(() => openSharedGroup(inv.group_id), 300);
+    }
   } catch(e) {
     toast('Fehler beim Beitreten: ' + e.message);
   }
@@ -2999,7 +3005,8 @@ async function openShareModal() {
     'group_id=eq.' + encodeURIComponent(gidForInv) + '&accepted_at=is.null&select=id,email,role,created_at', null) || [];
 
   const isAdmin = members.find(x=>x.user_id===_currentUserId)?.role==='admin'
-                  || (!shared && !list._sharedGroupId); // Creator vor erstem Share
+                  || (list._sharedGroupId && !members.length) // Creator, noch keine members geladen
+                  || (!shared && !list._sharedGroupId); // eigene Gruppe, noch nicht geteilt
 
   // Mitglieder rendern
   const memberHtml = members.length ? members.map(m => `
@@ -3035,8 +3042,9 @@ async function openShareModal() {
           <div class="member-role" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px">
             <span class="role-badge ${inv.role}" style="opacity:0.7">${inv.role==='admin'?'⚡ Admin':'👁 Leser'}</span>
             <span style="color:var(--text3);font-size:11px">· ausstehend</span>
-            ${isAdmin ? `<button class="inv-resend-btn" style="background:none;border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:11px;font-weight:700;padding:2px 8px;cursor:pointer;font-family:Outfit,sans-serif">🔄 Erneut</button>
-            <button class="inv-cancel-btn" style="background:none;border:1px solid var(--danger);border-radius:6px;color:var(--danger);font-size:11px;font-weight:700;padding:2px 8px;cursor:pointer;font-family:Outfit,sans-serif">✕ Zurückziehen</button>` : ''}
+            ${isAdmin ? `
+            <button class="inv-resend-btn" style="background:rgba(79,127,255,0.15);border:1px solid var(--accent);border-radius:8px;color:var(--accent);font-size:12px;font-weight:700;padding:4px 10px;cursor:pointer;font-family:Outfit,sans-serif;margin-top:2px">🔄 Erneut senden</button>
+            <button class="inv-cancel-btn" style="background:rgba(255,80,80,0.1);border:1px solid var(--danger);border-radius:8px;color:var(--danger);font-size:12px;font-weight:700;padding:4px 10px;cursor:pointer;font-family:Outfit,sans-serif;margin-top:2px">✕ Zurückziehen</button>` : ''}
           </div>
         </div>
       </div>`;
@@ -3044,13 +3052,15 @@ async function openShareModal() {
 
   document.getElementById('share-members-list').innerHTML = memberHtml + pendingHtml;
 
-  // Event Delegation für Erneut-senden + Zurückziehen (data-Attribute statt inline onclick)
+  // Event Delegation für Erneut-senden + Zurückziehen
   document.getElementById('share-members-list').querySelectorAll('.pending-inv-row').forEach(row => {
     const id    = row.dataset.invId;
     const email = row.dataset.invEmail;
     const role  = row.dataset.invRole;
-    row.querySelector('.inv-resend-btn')?.addEventListener('click', () => resendInvitation(id, email, role));
-    row.querySelector('.inv-cancel-btn')?.addEventListener('click', () => cancelInvitation(id, email));
+    const resendBtn = row.querySelector('.inv-resend-btn');
+    const cancelBtn = row.querySelector('.inv-cancel-btn');
+    if (resendBtn) resendBtn.onclick = () => resendInvitation(id, email, role);
+    if (cancelBtn) cancelBtn.onclick = () => cancelInvitation(id, email);
   });
 
   // Aktivitäts-Verlauf
