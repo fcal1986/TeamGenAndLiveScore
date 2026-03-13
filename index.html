@@ -1184,6 +1184,82 @@
   .sw-lap-row.sw-lap-worst .sw-lap-time { color:#ff5050; }
   .sw-lap-row.sw-lap-best  { background:rgba(16,185,129,0.04); }
   .sw-lap-row.sw-lap-worst { background:rgba(255,80,80,0.04); }
+
+  /* ── Stoppuhr FAB ── */
+  #sw-fab {
+    position: fixed; bottom: 16px; left: 16px; z-index: 9997;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: linear-gradient(135deg, #1e3a5f, #1a2540);
+    border: 2px solid var(--accent);
+    color: #fff; font-size: 22px; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(79,127,255,0.4);
+    transition: all .2s;
+  }
+  #sw-fab:active { transform: scale(0.92); }
+  #sw-fab.running {
+    border-color: #10b981;
+    box-shadow: 0 4px 16px rgba(16,185,129,0.5);
+    animation: swFabPulse 1.5s ease-in-out infinite;
+  }
+  #sw-fab.warning {
+    border-color: #f59e0b;
+    box-shadow: 0 4px 16px rgba(245,158,11,0.5);
+  }
+  @keyframes swFabPulse {
+    0%,100% { box-shadow: 0 4px 16px rgba(16,185,129,0.4); }
+    50%      { box-shadow: 0 4px 24px rgba(16,185,129,0.8); }
+  }
+
+  /* ── Stoppuhr Panel (Overlay, kein eigener Screen) ── */
+  #sw-panel {
+    position: fixed; bottom: 80px; left: 12px;
+    width: min(360px, calc(100vw - 24px));
+    max-height: calc(100vh - 100px);
+    background: var(--surface);
+    border: 1.5px solid var(--accent);
+    border-radius: 20px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    z-index: 9996;
+    display: none; flex-direction: column;
+    overflow: hidden;
+    transition: opacity .2s, transform .2s;
+    transform: translateY(10px); opacity: 0;
+  }
+  #sw-panel.open {
+    display: flex !important; opacity: 1; transform: translateY(0);
+  }
+  .sw-panel-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .sw-panel-title { font-size: 14px; font-weight: 800; flex: 1; }
+  .sw-panel-close {
+    background: none; border: none; color: var(--text3);
+    font-size: 18px; cursor: pointer; padding: 2px 6px;
+    border-radius: 6px; line-height: 1;
+  }
+  .sw-panel-close:active { background: var(--surface2); }
+  .sw-panel-body { overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Kompakte Display im Panel */
+  .sw-panel .sw-display { padding: 18px 14px 14px; border-radius: 14px; }
+  .sw-panel .sw-time { font-size: 52px; letter-spacing: -2px; }
+  .sw-panel .sw-millis { font-size: 22px; }
+  .sw-panel .sw-controls { gap: 8px; }
+  .sw-panel .sw-btn { padding: 12px 8px; min-height: 46px; font-size: 14px; border-radius: 12px; }
+  .sw-panel .sw-btn-reset { flex: 0 0 46px; font-size: 18px; }
+  .sw-panel .sw-btn-lap   { flex: 0 0 46px; font-size: 16px; }
+  .sw-panel .sw-config { border-radius: 12px; padding: 12px; }
+  .sw-panel .sw-time-input { width: 46px; font-size: 16px; padding: 7px 4px; }
+
+  /* ── Spieler-Marker (Überzahl / Pro) ── */
+  .person-marker { font-size: 11px; margin-left: 4px; opacity: 0.8; }
+  .marker-weak { color: #f59e0b; }   /* Überzahl-Team */
+  .marker-pro  { color: #10b981; }   /* Pro / getrennt halten */
+
 </style>
 </head>
 <body>
@@ -1289,6 +1365,9 @@
 
 
 <!-- ══ DEBUG PANEL ══ -->
+<!-- Stoppuhr FAB -->
+<button id="sw-fab" onclick="swPanelToggle()" title="Stoppuhr">⏱</button>
+
 <button id="debug-toggle" title="Debug Log">
   🐛
   <span id="debug-badge"></span>
@@ -1429,6 +1508,10 @@
       </div>
       <div id="banner-chips" style="display:flex;flex-wrap:wrap;gap:4px"></div>
       <div id="banner-count" style="font-size:11px;font-weight:600;color:var(--text3);margin-top:6px"></div>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px">
+        <span style="margin-right:8px">⚖ Überzahl-Team</span><span>★ Pro (getrennt)</span>
+        <span style="margin-left:8px;color:var(--text3)">○ = Tippen zum Ändern</span>
+      </div>
     </div>
     <div style="padding:12px 20px 6px">
       <h2 style="font-size:13px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">Was soll passieren?</h2>
@@ -2067,7 +2150,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-13-D';
+const BUILD_VERSION = 'v2026-03-13-E';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2411,6 +2494,7 @@ function showApp(user) {
   if (authScr) { authScr.style.display = 'none'; authScr.classList.remove('active'); }
   hideAuthLoading();
   dbg('showApp: screen-auth=' + (authScr?.style.display||'?') + ' auth-loading=' + (document.getElementById('auth-loading')?.style.display||'?'), 'info');
+  swShowFab(); // Stoppuhr FAB anzeigen
   const btn = document.getElementById('user-avatar-btn');
   if (btn) {
     btn.style.display = 'flex';
@@ -2787,6 +2871,7 @@ async function signOut() {
   state = { lists:[], currentListId:null, currentHistoryId:null, pendingResult:null, currentTab:'actions', activeTournamentId:null };
   saveLocal();
   resetAuthForm();
+  swHideFab();
   showAuthScreen();
   renderLists();
 }
@@ -3976,12 +4061,16 @@ function renderPersons() {
   counter.textContent = activeCount + ' / ' + list.persons.length + ' dabei';
   const toggleAllBtn = document.getElementById('toggle-all-btn');
   if (toggleAllBtn) toggleAllBtn.textContent = activeCount === list.persons.length ? 'Alle ab' : 'Alle an';
-  chips.innerHTML = list.persons.map(p =>
-    `<span class="person-chip ${p.active?'active':'inactive'}" onclick="togglePerson('${p.id}')">
-      ${p.active?'✅':'⛔'} ${p.name}
+  chips.innerHTML = list.persons.map(p => {
+    const weakBadge = p.weak ? '<span style="font-size:10px;margin-left:2px;opacity:0.9" title="Überzahl-Team">⚖</span>' : '';
+    const proBadge  = p.pro  ? '<span style="font-size:10px;margin-left:2px;opacity:0.9" title="Pro – getrennt">★</span>' : '';
+    return `<span class="person-chip ${p.active?'active':'inactive'}" onclick="togglePerson('${p.id}')">
+      ${p.active?'✅':'⛔'} ${p.name}${weakBadge}${proBadge}
+      <button class="del-chip marker-cycle" onclick="event.stopPropagation();cyclePersonMarker('${p.id}')"
+        title="${p.weak?'Überzahl ⚖':p.pro?'Pro ★':'Normal'}" style="font-size:10px;margin-right:2px;opacity:0.8">${p.weak?'⚖':p.pro?'★':'○'}</button>
       <button class="del-chip" onclick="event.stopPropagation();deletePerson('${p.id}')">×</button>
-    </span>`
-  ).join('');
+    </span>`;
+  }).join('');
 }
 
 function addPerson() {
@@ -4061,14 +4150,98 @@ function runTeams() {
   const n = parseInt(document.getElementById('teams-count').textContent);
   const ap = getActivePersons();
   if (n > ap.length) { toast('⚠️ Mehr Teams als aktive Personen'); return; }
-  const shuffled = shuffle(ap);
-  const teams = Array.from({length:n}, ()=>[]);
-  shuffled.forEach((p,i) => teams[i%n].push(p.name));
+
+  const teams = buildBalancedTeams(ap, n, list);
   saveSessionSnapshot();
   state.pendingResult = { type:'teams', title:'Teams erstellen', data: teams };
   closeModal('modal-teams');
   showResult();
 }
+
+// ── Ausgewogener Team-Baukasten ────────────────────────────
+function buildBalancedTeams(players, nTeams, list) {
+  // History der letzten 4 Ziehungen (Paare die zusammen waren)
+  if (!list._teamHistory) list._teamHistory = [];
+  const hist = list._teamHistory; // Array von [{name:...,team:N}]
+
+  // Pair-Score: wie oft waren A+B in letzten Runden zusammen?
+  function pairScore(a, b) {
+    let score = 0;
+    hist.forEach((round, ri) => {
+      const weight = (hist.length - ri); // ältere Runden weniger Gewicht
+      const ta = round.find(x => x.name === a)?.team;
+      const tb = round.find(x => x.name === b)?.team;
+      if (ta !== undefined && ta === tb) score += weight;
+    });
+    return score;
+  }
+
+  // Spieler kategorisieren
+  const weakPlayers = players.filter(p => p.weak);
+  const proPlayers  = players.filter(p => p.pro);
+  const normalPlayers = players.filter(p => !p.weak && !p.pro);
+
+  // Teamgrößen berechnen (manche Teams haben +1 Spieler)
+  const baseSize   = Math.floor(players.length / nTeams);
+  const extraSlots = players.length % nTeams;
+  const teamSizes  = Array.from({length:nTeams}, (_,i) => baseSize + (i < extraSlots ? 1 : 0));
+  const teams      = Array.from({length:nTeams}, () => []);
+
+  // Pro-Spieler: gleichmäßig auf verschiedene Teams verteilen (nicht zusammen)
+  const proShuffled = shuffle(proPlayers);
+  proShuffled.forEach((p, i) => {
+    // Team mit wenigsten Spielern und wenigsten Pro-Spielern
+    const tIdx = teams.reduce((best, t, ti) => {
+      const proCount = t.filter(x => x.pro).length;
+      const bProCount = teams[best].filter(x => x.pro).length;
+      if (t.length < teams[best].length) return ti;
+      if (t.length === teams[best].length && proCount < bProCount) return ti;
+      return best;
+    }, 0);
+    teams[tIdx].push(p);
+  });
+
+  // Weak-Spieler: ins größte Team (Überzahl)
+  const weakShuffled = shuffle(weakPlayers);
+  weakShuffled.forEach(p => {
+    // Team mit meisten Plätzen (extraSlots)
+    const tIdx = teams.reduce((best, t, ti) =>
+      teamSizes[ti] - t.length > teamSizes[best] - teams[best].length ? ti : best, 0);
+    teams[tIdx].push(p);
+  });
+
+  // Normal + restliche: greedy Anti-Repeat Zuteilung
+  // Sortiere: Spieler mit höchstem Paar-Score zuerst (werden zuerst verteilt auf freie Teams)
+  const remaining = shuffle(normalPlayers.concat(
+    // Spieler die noch nicht zugeteilt wurden
+  ).filter(p => !teams.flat().find(t => t.id === p.id)));
+
+  remaining.forEach(p => {
+    // Wähle Team mit: 1. wenigsten Spielern, 2. niedrigstem Paar-Score
+    let bestTeam = -1, bestScore = Infinity;
+    teams.forEach((t, ti) => {
+      if (t.length >= teamSizes[ti]) return; // Team voll
+      const score = t.reduce((s, m) => s + pairScore(p.name, m.name), 0);
+      const sizePenalty = t.length * 100; // volle Teams vermeiden
+      const total = score + sizePenalty;
+      if (total < bestScore) { bestScore = total; bestTeam = ti; }
+    });
+    if (bestTeam === -1) {
+      // Fallback: kleinster Team
+      bestTeam = teams.reduce((b, t, i) => t.length < teams[b].length ? i : b, 0);
+    }
+    teams[bestTeam].push(p);
+  });
+
+  // History speichern
+  const roundEntry = teams.flatMap((t, ti) => t.map(p => ({ name: p.name, team: ti })));
+  hist.push(roundEntry);
+  if (hist.length > 4) hist.shift(); // max 4 Runden merken
+  save();
+
+  return teams.map(t => t.map(p => p.name));
+}
+
 
 function runPairs() {
   const list = getCurrentList(); if (!list) return;
@@ -5303,15 +5476,17 @@ function toggleAdvancedSettings() {
 const _sw = {
   mode:    'up',    // 'up' | 'down'
   running: false,
-  startTs: 0,       // performance.now() beim letzten Start
-  elapsed: 0,       // akkumulierte ms (Summe aller Laufphasen)
-  limitMs: 0,       // 0 = kein Limit aktiv
+  startTs: 0,
+  elapsed: 0,
+  limitMs: 0,
   soundOn: true,
   interval: null,
   laps: [],
   lastLapMs: 0,
   beeped: false,
   audioCtx: null,
+  customBeepData: null,  // base64 DataURL
+  customBeepName: null,
 };
 
 // ── Öffnen / Schließen ────────────────────────────────────
@@ -5378,6 +5553,7 @@ function swStartPause() {
     _sw.interval = setInterval(swTick, 33); // ~30 fps
   }
   swRender();
+  swUpdateFab();
 }
 
 // ── Reset ────────────────────────────────────────────────
@@ -5430,6 +5606,7 @@ function swDisplayMs() {
 // ── Tick (33ms Interval) ─────────────────────────────────
 function swTick() {
   swRender();
+  swUpdateFab();
 
   if (!_sw.beeped && _sw.soundOn) {
     const reached = _sw.mode === 'up'
@@ -5566,6 +5743,15 @@ function swFmtMs(ms) {
 // ── Akustisches Signal ───────────────────────────────────
 function swBeep() {
   if (!_sw.soundOn) return;
+  // Custom Audio (hochgeladene Datei)
+  if (_sw.customBeepData) {
+    try {
+      const audio = new Audio(_sw.customBeepData);
+      audio.volume = 0.9;
+      audio.play().catch(() => {});
+      return;
+    } catch(e) { console.warn('Custom beep Fehler:', e); }
+  }
   try {
     if (!_sw.audioCtx) {
       _sw.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -5603,32 +5789,116 @@ document.addEventListener('touchstart', function _swAudioUnlock() {
   document.removeEventListener('touchstart', _swAudioUnlock);
 }, { passive: true });
 
+
+// ══════════════════════════════════════════════════════════
+// STOPPUHR FAB + PANEL CONTROLLER
+// ══════════════════════════════════════════════════════════
+
+function swPanelOpen() {
+  const fab   = document.getElementById('sw-fab');
+  const panel = document.getElementById('sw-panel');
+  if (fab)   fab.style.display   = 'flex';
+  if (panel) {
+    panel.style.display = 'flex';
+    // Force reflow so transition plays
+    panel.offsetHeight; // eslint-disable-line
+    requestAnimationFrame(() => panel.classList.add('open'));
+  }
+  swRender();
+}
+function swPanelClose() {
+  const panel = document.getElementById('sw-panel');
+  if (panel) {
+    panel.classList.remove('open');
+    setTimeout(() => { if (!panel.classList.contains('open')) panel.style.display = 'none'; }, 220);
+  }
+}
+function swPanelToggle() {
+  const panel = document.getElementById('sw-panel');
+  if (!panel) return;
+  if (panel.classList.contains('open')) swPanelClose();
+  else swPanelOpen();
+}
+
+// FAB nach Login anzeigen
+function swShowFab() {
+  const fab = document.getElementById('sw-fab');
+  if (fab) fab.style.display = 'flex';
+}
+function swHideFab() {
+  const fab = document.getElementById('sw-fab');
+  if (fab) { fab.style.display = 'none'; swPanelClose(); }
+}
+
+// FAB Status-Update (läuft / warnt)
+function swUpdateFab() {
+  const fab = document.getElementById('sw-fab');
+  if (!fab) return;
+  fab.classList.remove('running','warning');
+  if (!_sw.running) return;
+  const ms = swCurrentMs();
+  const cdMs = _sw.mode === 'down' ? swCountdownMs() : null;
+  if ((_sw.mode === 'up' && _sw.limitMs > 0 && ms >= _sw.limitMs * 0.85) ||
+      (_sw.mode === 'down' && cdMs !== null && cdMs <= 10000)) {
+    fab.classList.add('warning');
+  } else if (_sw.running) {
+    fab.classList.add('running');
+  }
+}
+
+// Custom Beep laden
+function swLoadCustomBeep(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    toast('❌ Datei zu groß – max 5 MB'); input.value = ''; return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _sw.customBeepData = e.target.result;
+    _sw.customBeepName = file.name;
+    document.getElementById('sw-beep-name').textContent = '🎵 ' + file.name;
+    document.getElementById('sw-beep-name').style.display = 'block';
+    document.getElementById('sw-beep-clear').style.display = 'flex';
+    toast('✅ Ton geladen: ' + file.name);
+  };
+  reader.readAsDataURL(file);
+}
+function swClearCustomBeep() {
+  _sw.customBeepData = null;
+  _sw.customBeepName = null;
+  document.getElementById('sw-beep-name').style.display = 'none';
+  document.getElementById('sw-beep-clear').style.display = 'none';
+  document.getElementById('sw-beep-file').value = '';
+  toast('Eigener Ton entfernt');
+}
+
 </script>
 
 <!-- ══════════════════════════════════════════
      STOPPUHR SCREEN
 ══════════════════════════════════════════ -->
-<div class="screen" id="screen-stopwatch">
 
-  <!-- Header -->
-  <div class="sw-header">
-    <button class="back-btn" onclick="closeStopwatch()" aria-label="Zurück">‹</button>
-    <h1>⏱ Stoppuhr</h1>
-    <button class="sw-sound-btn" id="sw-sound-btn" onclick="swToggleSound()" title="Ton ein/aus">🔔</button>
+<!-- ══ STOPPUHR FLOATING PANEL ══ -->
+<div id="sw-panel">
+  <div class="sw-panel-header">
+    <span style="font-size:18px">⏱</span>
+    <span class="sw-panel-title">Stoppuhr</span>
+    <button id="sw-panel-sound" onclick="swToggleSound()" style="background:none;border:none;font-size:16px;cursor:pointer;padding:2px 6px">🔔</button>
+    <button class="sw-panel-close" onclick="swPanelClose()">✕</button>
   </div>
-
-  <div class="sw-body">
+  <div class="sw-panel-body sw-panel">
 
     <!-- Mode Toggle -->
     <div class="sw-mode-toggle">
-      <button class="sw-mode-btn active" id="sw-btn-countup"   onclick="swSetMode('up')">⬆ Count-Up</button>
-      <button class="sw-mode-btn"        id="sw-btn-countdown" onclick="swSetMode('down')">⬇ Count-Down</button>
+      <button class="sw-mode-btn active" id="sw-btn-countup"   onclick="swSetMode('up')">⬆ Up</button>
+      <button class="sw-mode-btn"        id="sw-btn-countdown" onclick="swSetMode('down')">⬇ Down</button>
     </div>
 
-    <!-- Main Display -->
+    <!-- Display -->
     <div class="sw-display" id="sw-display">
-      <div style="display:flex;align-items:baseline;justify-content:center;gap:0">
-        <span id="sw-time"   class="sw-time">00:00</span>
+      <div style="display:flex;align-items:baseline;justify-content:center">
+        <span id="sw-time" class="sw-time">00:00</span>
         <span id="sw-millis" class="sw-millis">.00</span>
       </div>
       <div id="sw-status-label" class="sw-status-label">Bereit</div>
@@ -5637,64 +5907,62 @@ document.addEventListener('touchstart', function _swAudioUnlock() {
       </div>
     </div>
 
-    <!-- Controls: Start/Pause | Runde | Reset -->
+    <!-- Controls -->
     <div class="sw-controls">
-      <button class="sw-btn sw-btn-start" id="sw-btn-main"  onclick="swStartPause()">▶&nbsp;Start</button>
-      <button class="sw-btn sw-btn-lap"   id="sw-btn-lap"   onclick="swLap()"   title="Runde erfassen">⚑</button>
-      <button class="sw-btn sw-btn-reset"                   onclick="swReset()"  title="Zurücksetzen">↺</button>
+      <button class="sw-btn sw-btn-start" id="sw-btn-main" onclick="swStartPause()">▶ Start</button>
+      <button class="sw-btn sw-btn-lap"   id="sw-btn-lap"  onclick="swLap()" title="Runde">⚑</button>
+      <button class="sw-btn sw-btn-reset"                  onclick="swReset()" title="Reset">↺</button>
     </div>
 
     <!-- Config -->
     <div class="sw-config">
-      <div class="sw-config-title">⚙&nbsp; Einstellungen</div>
+      <div class="sw-config-title">⚙ Einstellungen</div>
 
-      <!-- Count-Down Startzeit (nur bei Down-Modus) -->
       <div class="sw-config-row" id="sw-row-cdstart" style="display:none">
-        <div>
-          <div class="sw-config-label">Startzeit</div>
-          <div class="sw-config-sub">Countdown beginnt ab</div>
-        </div>
+        <div><div class="sw-config-label">Startzeit</div></div>
         <div class="sw-time-inputs">
           <input class="sw-time-input" type="number" id="sw-cd-min" min="0" max="99" value="5" oninput="swUpdateConfig()">
           <span class="sw-time-sep">:</span>
-          <input class="sw-time-input" type="number" id="sw-cd-sec" min="0" max="59" value="0"  oninput="swUpdateConfig()">
+          <input class="sw-time-input" type="number" id="sw-cd-sec" min="0" max="59" value="0" oninput="swUpdateConfig()">
         </div>
       </div>
 
-      <!-- Zeitlimit Toggle (Count-Up) -->
       <div class="sw-config-row" id="sw-row-limit-toggle">
-        <div>
-          <div class="sw-config-label">Zeitlimit</div>
-          <div class="sw-config-sub">Alarm wenn erreicht</div>
-        </div>
+        <div><div class="sw-config-label">Zeitlimit</div><div class="sw-config-sub">Alarm wenn erreicht</div></div>
         <label class="sw-toggle">
           <input type="checkbox" id="sw-limit-on" onchange="swUpdateConfig()">
-          <div class="sw-toggle-track"></div>
-          <div class="sw-toggle-thumb"></div>
+          <div class="sw-toggle-track"></div><div class="sw-toggle-thumb"></div>
         </label>
       </div>
 
-      <!-- Zeitlimit Eingabe -->
       <div class="sw-config-row" id="sw-row-limit-inputs" style="display:none">
-        <div class="sw-config-label sw-config-sub">Limit (Min : Sek)</div>
+        <div class="sw-config-label sw-config-sub">Limit (Min:Sek)</div>
         <div class="sw-time-inputs">
           <input class="sw-time-input" type="number" id="sw-lim-min" min="0" max="99" value="5" oninput="swUpdateConfig()">
           <span class="sw-time-sep">:</span>
-          <input class="sw-time-input" type="number" id="sw-lim-sec" min="0" max="59" value="0"  oninput="swUpdateConfig()">
+          <input class="sw-time-input" type="number" id="sw-lim-sec" min="0" max="59" value="0" oninput="swUpdateConfig()">
         </div>
       </div>
 
-      <!-- Signalton Toggle -->
       <div class="sw-config-row">
-        <div>
-          <div class="sw-config-label">Signalton</div>
-          <div class="sw-config-sub">Bei Limit / Zeit abgelaufen</div>
-        </div>
+        <div><div class="sw-config-label">Signalton</div></div>
         <label class="sw-toggle">
           <input type="checkbox" id="sw-sound-on" checked onchange="swUpdateConfig()">
-          <div class="sw-toggle-track"></div>
-          <div class="sw-toggle-thumb"></div>
+          <div class="sw-toggle-track"></div><div class="sw-toggle-thumb"></div>
         </label>
+      </div>
+
+      <!-- Custom Beep Upload -->
+      <div class="sw-config-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <div class="sw-config-label">Eigener Ton <span style="font-size:11px;color:var(--text3)">(max 5 MB)</span></div>
+        <div style="display:flex;gap:8px;align-items:center;width:100%">
+          <label style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;text-align:center">
+            📁 Datei wählen
+            <input type="file" id="sw-beep-file" accept="audio/*" style="display:none" onchange="swLoadCustomBeep(this)">
+          </label>
+          <button id="sw-beep-clear" onclick="swClearCustomBeep()" style="display:none;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer">✕</button>
+        </div>
+        <div id="sw-beep-name" style="font-size:11px;color:var(--accent);display:none"></div>
       </div>
 
     </div>
@@ -5703,13 +5971,24 @@ document.addEventListener('touchstart', function _swAudioUnlock() {
     <div class="sw-laps" id="sw-laps-wrap">
       <div class="sw-laps-header">
         <span class="sw-laps-title">Rundenzeiten</span>
-        <button class="sw-btn-clear-laps" onclick="swClearLaps()">✕ Leeren</button>
+        <button class="sw-btn-clear-laps" onclick="swClearLaps()">✕</button>
       </div>
       <div id="sw-laps-list"></div>
     </div>
 
-  </div><!-- /sw-body -->
-</div><!-- /screen-stopwatch -->
+  </div>
+</div>
 
 </body>
 </html>
+// Spieler-Marker durchschalten: normal → weak (⚖) → pro (★) → normal
+function cyclePersonMarker(id) {
+  const list = getCurrentList(); if (!list) return;
+  const p = list.persons.find(x => x.id === id); if (!p) return;
+  if (!p.weak && !p.pro) { p.weak = true; p.pro = false; toast('⚖ ' + p.name + ' → Überzahl-Team'); }
+  else if (p.weak)        { p.weak = false; p.pro = true;  toast('★ ' + p.name + ' → Pro (getrennt halten)'); }
+  else                    { p.weak = false; p.pro = false;  toast('○ ' + p.name + ' → Normal'); }
+  save();
+  renderPersons();
+}
+
