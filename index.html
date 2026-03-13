@@ -4168,18 +4168,18 @@ function openAction(type) {
   else if (type==='allvsall') openModal('modal-allvsall');
 }
 
-function shuffle(arr) {
-// Helper: render a team player entry (may be string or {name,weak,pro} object)
+// ── Helper: render team player entry (string or {name,weak,pro}) ──
 function playerLabel(p) {
   const name = typeof p === 'string' ? p : p.name;
   const weak = typeof p === 'object' && p.weak;
   const pro  = typeof p === 'object' && p.pro;
-  const wb = weak ? '<span style="font-size:10px;color:#f59e0b;margin-left:2px" title="Überzahl-Team">⚖</span>' : '';
-  const pb = pro  ? '<span style="font-size:10px;color:#10b981;margin-left:2px" title="Pro">★</span>' : '';
+  const wb = weak ? '<span style="font-size:10px;color:#f59e0b;margin-left:3px" title="Überzahl-Team">⚖</span>' : '';
+  const pb = pro  ? '<span style="font-size:10px;color:#10b981;margin-left:3px" title="Pro">★</span>' : '';
   return `<span style="white-space:nowrap">${name}${wb}${pb}</span>`;
 }
 function playerName(p) { return typeof p === 'string' ? p : p.name; }
 
+function shuffle(arr) {
   const a = [...arr];
   for (let i=a.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
   return a;
@@ -4341,14 +4341,7 @@ function showResult() {
     content.innerHTML = r.data.map((team,i) =>
       `<div class="result-team">
         <div class="result-team-badge">${i+1}</div>
-        <div class="result-names">${team.map(p => {
-          const name = typeof p === 'string' ? p : p.name;
-          const weak = typeof p === 'object' && p.weak;
-          const pro  = typeof p === 'object' && p.pro;
-          const wb = weak ? '<span style="font-size:11px;color:#f59e0b;margin-left:2px" title="Überzahl-Team">⚖</span>' : '';
-          const pb = pro  ? '<span style="font-size:11px;color:#10b981;margin-left:2px" title="Pro">★</span>' : '';
-          return `<span style="white-space:nowrap">${name}${wb}${pb}</span>`;
-        }).join(', ')}</div>
+        <div class="result-names">${team.map(playerLabel).join(', ')}</div>
       </div>`
     ).join('');
   } else if (r.type === 'pairs') {
@@ -5398,9 +5391,7 @@ function repeatLastAction() {
     const n = r.data.length;
     const ap = getActivePersons();
     if (n > ap.length) { toast('⚠️ Nicht genug aktive Personen'); return; }
-    const shuffled = shuffle(ap);
-    const teams = Array.from({length:n},()=>[]);
-    shuffled.forEach((p,i)=>teams[i%n].push({ name: p.name, weak: !!p.weak, pro: !!p.pro }));
+    const teams = buildBalancedTeams(ap, n, list);
     state.pendingResult = { type:'teams', title:r.title, data:teams };
   } else if (r.type==='pairs') {
     const size = r.data[0]?.length || 2;
