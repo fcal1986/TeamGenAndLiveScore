@@ -1316,7 +1316,7 @@
 </div>
 
 <!-- ===================== SCREEN: LISTEN ===================== -->
-<div class="screen active" id="screen-lists">
+<div class="screen active" id="screen-lists" style="overflow-y:auto;min-height:100vh">
   <div class="header">
     <h1>🎲 Spielr</h1>
     <span id="groups-count" style="font-size:12px;color:var(--text3);font-weight:600;flex:1"></span>
@@ -2060,7 +2060,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-13-A';
+const BUILD_VERSION = 'v2026-03-13-B';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2262,10 +2262,22 @@ function showAuthLoading(msg) {
 }
 function hideAuthLoading() {
   const el = document.getElementById('auth-loading');
-  if (el) { el.classList.remove('show'); el.style.display = 'none'; }
+  if (el) {
+    el.classList.remove('show');
+    el.style.display = 'none';
+    el.style.visibility = 'hidden';
+    el.style.pointerEvents = 'none';
+    el.style.zIndex = '-1';
+  }
 }
-// Sicherheitsnetz: auth-loading kann NIE länger als 4s oben bleiben
-setTimeout(() => hideAuthLoading(), 4000);
+// Sicherheitsnetz: auth-loading kann NIE länger als 3s oben bleiben
+setTimeout(() => {
+  const el = document.getElementById('auth-loading');
+  if (el && (el.classList.contains('show') || el.style.display === 'flex')) {
+    dbg('⚠ Sicherheitsnetz: auth-loading nach 3s zwangsweise ausgeblendet', 'err');
+    hideAuthLoading();
+  }
+}, 3000);
 
 // ── Sicheres Login+Load: Spinner wird IMMER beendet ──
 async function _doLoginAndShow(user, token) {
@@ -2318,7 +2330,16 @@ async function _doLoginAndShow(user, token) {
     }
   } catch(e) {
     dbg('_doLoginAndShow Fehler: ' + e.message, 'err');
-    try { showApp(user); renderLists(); showScreen('screen-lists'); } catch(_) {}
+    dbg('Stack: ' + (e.stack||'').substring(0,200), 'err');
+    try {
+      showApp(user);
+      renderLists();
+      showScreen('screen-lists');
+      hideAuthLoading();
+    } catch(e2) {
+      dbg('Fallback Fehler: ' + e2.message, 'err');
+      hideAuthLoading();
+    }
   } finally {
     hideAuthLoading();
   }
@@ -3655,8 +3676,43 @@ initApp();
 
 // ===================== NAVIGATION =====================
 function showScreen(id) {
+  const target = document.getElementById(id);
+  if (!target) {
+    dbg('showScreen FEHLER: Element "' + id + '" nicht gefunden!', 'err');
+    return;
+  }
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  target.classList.add('active');
+  // Prüfe ob Screen wirklich sichtbar ist
+  requestAnimationFrame(() => {
+    const rect = target.getBoundingClientRect();
+    const computed = window.getComputedStyle(target);
+    const isVisible = rect.width > 0 && rect.height > 0 && computed.display !== 'none';
+    dbg('showScreen("' + id + '"): ' + computed.display + ' | ' + Math.round(rect.width) + '×' + Math.round(rect.height) + (isVisible ? ' ✅' : ' ❌ NICHT SICHTBAR'), isVisible ? 'ok' : 'err');
+    if (!isVisible) {
+      // DOM-State dump
+      document.querySelectorAll('.screen').forEach(s => {
+        const r2 = s.getBoundingClientRect();
+        const c2 = window.getComputedStyle(s);
+        dbg('  screen#' + s.id + ': display=' + c2.display + ' active=' + s.classList.contains('active') + ' ' + Math.round(r2.width) + '×' + Math.round(r2.height), 'info');
+      });
+      // Overlay-Check
+      const overlays = ['auth-loading','modal-overlay'];
+      overlays.forEach(oid => {
+        const o = document.getElementById(oid);
+        if (o) {
+          const oc = window.getComputedStyle(o);
+          if (oc.display !== 'none') dbg('⚠ OVERLAY aktiv: #' + oid + ' display=' + oc.display + ' z-index=' + oc.zIndex, 'err');
+        }
+      });
+      // Alle fixed/absolute Elemente mit hohem z-index
+      let topEl = document.elementFromPoint(window.innerWidth/2, window.innerHeight/2);
+      if (topEl) dbg('Top-Element bei Bildschirmmitte: <' + topEl.tagName + '> id=' + (topEl.id||'?') + ' class=' + (topEl.className||'?').substring(0,40), 'err');
+    }
+  });
+  // Sicherstellen dass body/html nicht overflow:hidden hat
+  document.body.style.overflow = '';
+  document.documentElement.style.overflow = '';
   window.scrollTo(0,0);
 }
 function goBack(screenId) { showScreen(screenId); }
@@ -3699,7 +3755,12 @@ function renderLists() {
   const container = document.getElementById('lists-container');
   const empty = document.getElementById('lists-empty');
   const gc = document.getElementById('groups-count');
+  if (!container || !empty) {
+    dbg('renderLists: DOM-Elemente fehlen! container=' + !!container + ' empty=' + !!empty, 'err');
+    return;
+  }
   const total = state.lists.length + _sharedGroups.length;
+  dbg('renderLists: ' + state.lists.length + ' lokal + ' + _sharedGroups.length + ' geteilt = ' + total, 'info');
   if (gc) gc.textContent = total ? total + ' Gruppen' : '';
   if (!total) {
     empty.style.display = 'block'; container.innerHTML = ''; return;
