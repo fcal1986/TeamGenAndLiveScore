@@ -2150,7 +2150,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-13-E';
+const BUILD_VERSION = 'v2026-03-13-F';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -4066,8 +4066,9 @@ function renderPersons() {
     const proBadge  = p.pro  ? '<span style="font-size:10px;margin-left:2px;opacity:0.9" title="Pro – getrennt">★</span>' : '';
     return `<span class="person-chip ${p.active?'active':'inactive'}" onclick="togglePerson('${p.id}')">
       ${p.active?'✅':'⛔'} ${p.name}${weakBadge}${proBadge}
-      <button class="del-chip marker-cycle" onclick="event.stopPropagation();cyclePersonMarker('${p.id}')"
-        title="${p.weak?'Überzahl ⚖':p.pro?'Pro ★':'Normal'}" style="font-size:10px;margin-right:2px;opacity:0.8">${p.weak?'⚖':p.pro?'★':'○'}</button>
+      <button onclick="event.stopPropagation();cyclePersonMarker('${p.id}')"
+        title="${p.weak?'Überzahl ⚖ – Tippen zum Ändern':p.pro?'Pro ★ – Tippen zum Ändern':'Normal ○ – Tippen zum Markieren'}"
+        style="min-width:36px;height:36px;padding:0 6px;background:${p.weak?'rgba(245,158,11,0.15)':p.pro?'rgba(16,185,129,0.15)':'var(--surface2)'};border:1.5px solid ${p.weak?'#f59e0b':p.pro?'#10b981':'var(--border)'};border-radius:10px;font-size:15px;cursor:pointer;font-weight:700;line-height:1;flex-shrink:0;margin-right:4px;color:${p.weak?'#f59e0b':p.pro?'#10b981':'var(--text3)'}">${p.weak?'⚖':p.pro?'★':'○'}</button>
       <button class="del-chip" onclick="event.stopPropagation();deletePerson('${p.id}')">×</button>
     </span>`;
   }).join('');
@@ -5485,8 +5486,13 @@ const _sw = {
   lastLapMs: 0,
   beeped: false,
   audioCtx: null,
-  customBeepData: null,  // base64 DataURL
+  customBeepData: null,   // base64 DataURL (Signalton)
   customBeepName: null,
+  warnSecs: 10,           // Countdown-Warnung: 0 = aus, sonst 5-30s
+  warnBeepData: null,     // base64 DataURL (Countdown-Musik)
+  warnBeepName: null,
+  warnStarted: false,     // Countdown-Musik läuft bereits
+  warnAudio: null,        // HTMLAudioElement für Countdown-Musik
 };
 
 // ── Öffnen / Schließen ────────────────────────────────────
@@ -5564,10 +5570,13 @@ function swReset() {
   _sw.elapsed  = 0;
   _sw.startTs  = 0;
   _sw.beeped   = false;
+  _sw.warnStarted = false;
+  if (_sw.warnAudio) { try { _sw.warnAudio.pause(); } catch(e){} _sw.warnAudio = null; }
   _sw.laps     = [];
   _sw.lastLapMs = 0;
   swClearLaps();
   swRender();
+  swUpdateFab();
 }
 
 // ── Runde ────────────────────────────────────────────────
@@ -5604,7 +5613,58 @@ function swDisplayMs() {
 }
 
 // ── Tick (33ms Interval) ─────────────────────────────────
+
+// Countdown-Warnsound in letzten N Sekunden starten
+function swCheckWarnSound() {
+  if (!_sw.soundOn || !_sw.running || _sw.warnStarted) return;
+  if (_sw.warnSecs <= 0) return;
+  const warnMs = _sw.warnSecs * 1000;
+
+  let timeLeft = Infinity;
+  if (_sw.mode === 'down') {
+    timeLeft = swCountdownMs();
+  } else if (_sw.mode === 'up' && _sw.limitMs > 0) {
+    timeLeft = _sw.limitMs - swCurrentMs();
+  }
+  if (timeLeft <= 0 || timeLeft > warnMs) return;
+
+  // Warnton starten
+  _sw.warnStarted = true;
+  if (_sw.warnBeepData) {
+    try {
+      const audio = new Audio(_sw.warnBeepData);
+      audio.volume = 0.75;
+      audio.loop = false;
+      _sw.warnAudio = audio;
+      audio.play().catch(() => {});
+    } catch(e) {}
+  } else {
+    // Eingebauter "Tick-Tack"-Sound für letzte Sekunden
+    swPlayBuiltinWarning(timeLeft);
+  }
+}
+
+function swPlayBuiltinWarning(durationMs) {
+  const ctx = _sw.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  _sw.audioCtx = ctx;
+  if (ctx.state === 'suspended') ctx.resume();
+  const ticks = Math.floor(durationMs / 1000);
+  for (let i = 0; i < ticks; i++) {
+    const t = ctx.currentTime + i;
+    const osc = ctx.createOscillator();
+    const g   = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = i < ticks - 3 ? 880 : 1100; // letzte 3: höher
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.25, t + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(t); osc.stop(t + 0.2);
+  }
+}
+
 function swTick() {
+  swCheckWarnSound();
   swRender();
   swUpdateFab();
 
@@ -5741,6 +5801,26 @@ function swFmtMs(ms) {
 }
 
 // ── Akustisches Signal ───────────────────────────────────
+// Spielt Horn-Sound (Spielende) via WebAudio
+function swPlayHorn(ctx) {
+  // Horn-Synthese: zwei Töne überlagert, Attack + Decay
+  const t = ctx.currentTime;
+  const gainNode = ctx.createGain();
+  gainNode.connect(ctx.destination);
+  [[130, 0, 0.15], [196, 0.05, 0.12], [261, 0, 0.2]].forEach(([freq, delay, dur]) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(freq, t + delay);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.02, t + delay + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t + delay);
+    g.gain.linearRampToValueAtTime(0.35, t + delay + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.01, t + delay + dur);
+    osc.connect(g); g.connect(gainNode);
+    osc.start(t + delay); osc.stop(t + delay + dur + 0.05);
+  });
+}
+
 function swBeep() {
   if (!_sw.soundOn) return;
   // Custom Audio (hochgeladene Datei)
@@ -5847,30 +5927,127 @@ function swUpdateFab() {
 }
 
 // Custom Beep laden
+// (swLoadCustomBeep / swClearCustomBeep weiter unten definiert)
+
+
+// ── Spieler-Marker durchschalten: normal → weak (⚖) → pro (★) → normal ──
+function cyclePersonMarker(id) {
+  const list = getCurrentList(); if (!list) return;
+  const p = list.persons.find(x => x.id === id); if (!p) return;
+  if (!p.weak && !p.pro) { p.weak = true;  p.pro = false; toast('⚖ ' + p.name + ' → Überzahl-Team'); }
+  else if (p.weak)       { p.weak = false; p.pro = true;  toast('★ ' + p.name + ' → Pro (getrennt halten)'); }
+  else                   { p.weak = false; p.pro = false; toast('○ ' + p.name + ' → Normal'); }
+  save();
+  renderPersons();
+}
+
+// ── Stoppuhr FAB ──────────────────────────────────────────
+function swPanelOpen() {
+  const fab   = document.getElementById('sw-fab');
+  const panel = document.getElementById('sw-panel');
+  if (fab)   fab.style.display = 'flex';
+  if (panel) {
+    panel.style.display = 'flex';
+    panel.offsetHeight; // force reflow
+    requestAnimationFrame(() => panel.classList.add('open'));
+  }
+  swRender();
+}
+function swPanelClose() {
+  const panel = document.getElementById('sw-panel');
+  if (panel) {
+    panel.classList.remove('open');
+    setTimeout(() => { if (!panel.classList.contains('open')) panel.style.display = 'none'; }, 220);
+  }
+}
+function swPanelToggle() {
+  const panel = document.getElementById('sw-panel');
+  if (!panel) return;
+  if (panel.classList.contains('open')) swPanelClose();
+  else swPanelOpen();
+}
+function swShowFab() {
+  const fab = document.getElementById('sw-fab');
+  if (fab) fab.style.display = 'flex';
+}
+function swHideFab() {
+  const fab = document.getElementById('sw-fab');
+  if (fab) { fab.style.display = 'none'; swPanelClose(); }
+}
+function swUpdateFab() {
+  const fab = document.getElementById('sw-fab');
+  if (!fab) return;
+  fab.classList.remove('running','warning');
+  if (!_sw.running) { return; }
+  const ms = swCurrentMs();
+  const cdMs = _sw.mode === 'down' ? swCountdownMs() : null;
+  const isWarning = (_sw.mode === 'up'   && _sw.limitMs > 0 && ms >= _sw.limitMs * 0.85) ||
+                    (_sw.mode === 'down' && cdMs !== null && cdMs <= 10000);
+  fab.classList.add(isWarning ? 'warning' : 'running');
+}
 function swLoadCustomBeep(input) {
   const file = input.files[0];
   if (!file) return;
-  if (file.size > 5 * 1024 * 1024) {
-    toast('❌ Datei zu groß – max 5 MB'); input.value = ''; return;
-  }
+  if (file.size > 5 * 1024 * 1024) { toast('❌ Datei zu groß – max 5 MB'); input.value = ''; return; }
   const reader = new FileReader();
   reader.onload = e => {
     _sw.customBeepData = e.target.result;
     _sw.customBeepName = file.name;
-    document.getElementById('sw-beep-name').textContent = '🎵 ' + file.name;
-    document.getElementById('sw-beep-name').style.display = 'block';
-    document.getElementById('sw-beep-clear').style.display = 'flex';
+    const nameEl  = document.getElementById('sw-beep-name');
+    const clearEl = document.getElementById('sw-beep-clear');
+    if (nameEl)  { nameEl.textContent  = '🎵 ' + file.name; nameEl.style.display = 'block'; }
+    if (clearEl) clearEl.style.display = 'flex';
     toast('✅ Ton geladen: ' + file.name);
   };
   reader.readAsDataURL(file);
 }
 function swClearCustomBeep() {
-  _sw.customBeepData = null;
-  _sw.customBeepName = null;
-  document.getElementById('sw-beep-name').style.display = 'none';
-  document.getElementById('sw-beep-clear').style.display = 'none';
-  document.getElementById('sw-beep-file').value = '';
+  _sw.customBeepData = null; _sw.customBeepName = null;
+  const nameEl  = document.getElementById('sw-beep-name');
+  const clearEl = document.getElementById('sw-beep-clear');
+  const fileEl  = document.getElementById('sw-beep-file');
+  if (nameEl)  nameEl.style.display  = 'none';
+  if (clearEl) clearEl.style.display = 'none';
+  if (fileEl)  fileEl.value = '';
   toast('Eigener Ton entfernt');
+}
+
+
+// Ablauf-Warnung: Sekunden in 5er-Schritten (0, 5, 10, 15, 20, 25, 30)
+function swWarnSecsChange(delta) {
+  const steps = [0, 5, 10, 15, 20, 25, 30];
+  const cur = steps.indexOf(_sw.warnSecs);
+  const next = Math.max(0, Math.min(steps.length - 1, (cur === -1 ? 2 : cur) + (delta > 0 ? 1 : -1)));
+  _sw.warnSecs = steps[next];
+  const lbl = document.getElementById('sw-warn-secs-lbl');
+  if (lbl) lbl.textContent = _sw.warnSecs === 0 ? 'Aus' : _sw.warnSecs + 's';
+  const row = document.getElementById('sw-warn-upload-row');
+  if (row) row.style.opacity = _sw.warnSecs === 0 ? '0.4' : '1';
+}
+function swLoadWarnBeep(input) {
+  const file = input.files[0]; if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('❌ Datei zu groß – max 5 MB'); input.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _sw.warnBeepData = e.target.result;
+    _sw.warnBeepName = file.name;
+    const n = document.getElementById('sw-warn-name');
+    const c = document.getElementById('sw-warn-clear');
+    if (n) { n.textContent = '🎵 ' + file.name; n.style.display = 'block'; }
+    if (c) c.style.display = 'flex';
+    toast('✅ Ablauf-Musik geladen: ' + file.name);
+  };
+  reader.readAsDataURL(file);
+}
+function swClearWarnBeep() {
+  _sw.warnBeepData = null; _sw.warnBeepName = null;
+  const n = document.getElementById('sw-warn-name');
+  const c = document.getElementById('sw-warn-clear');
+  const f = document.getElementById('sw-warn-file');
+  if (n) n.style.display = 'none';
+  if (c) c.style.display = 'none';
+  if (f) f.value = '';
+  toast('Ablauf-Musik entfernt');
 }
 
 </script>
@@ -5944,17 +6121,18 @@ function swClearCustomBeep() {
         </div>
       </div>
 
+      <!-- Signalton (Spielende) -->
       <div class="sw-config-row">
-        <div><div class="sw-config-label">Signalton</div></div>
+        <div><div class="sw-config-label">🔔 Signalton bei Spielende</div><div class="sw-config-sub">Horn + Beeps</div></div>
         <label class="sw-toggle">
           <input type="checkbox" id="sw-sound-on" checked onchange="swUpdateConfig()">
           <div class="sw-toggle-track"></div><div class="sw-toggle-thumb"></div>
         </label>
       </div>
 
-      <!-- Custom Beep Upload -->
+      <!-- Eigener Signalton Upload -->
       <div class="sw-config-row" style="flex-direction:column;align-items:flex-start;gap:6px">
-        <div class="sw-config-label">Eigener Ton <span style="font-size:11px;color:var(--text3)">(max 5 MB)</span></div>
+        <div class="sw-config-label">Eigener Signalton <span style="font-size:11px;color:var(--text3)">(max 5 MB)</span></div>
         <div style="display:flex;gap:8px;align-items:center;width:100%">
           <label style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;text-align:center">
             📁 Datei wählen
@@ -5963,6 +6141,36 @@ function swClearCustomBeep() {
           <button id="sw-beep-clear" onclick="swClearCustomBeep()" style="display:none;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer">✕</button>
         </div>
         <div id="sw-beep-name" style="font-size:11px;color:var(--accent);display:none"></div>
+      </div>
+
+      <!-- Countdown-Warnung (Ablaufmusik) -->
+      <div class="sw-config-row">
+        <div>
+          <div class="sw-config-label">🎵 Ablauf-Warnung</div>
+          <div class="sw-config-sub">Musik in letzten Sekunden</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button onclick="swWarnSecsChange(-5)" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;width:32px;height:32px;font-size:18px;cursor:pointer;font-weight:700;color:var(--text)">−</button>
+          <span id="sw-warn-secs-lbl" style="font-size:14px;font-weight:800;min-width:36px;text-align:center;color:var(--accent)">10s</span>
+          <button onclick="swWarnSecsChange(+5)" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;width:32px;height:32px;font-size:18px;cursor:pointer;font-weight:700;color:var(--text)">+</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);padding:0 2px 4px">
+        Aus (0s) · 5 · 10 · 15 · 20 · 25 · 30s – Musik startet N Sek. vor Ende
+      </div>
+
+      <!-- Eigene Ablauf-Musik Upload -->
+      <div class="sw-config-row" style="flex-direction:column;align-items:flex-start;gap:6px" id="sw-warn-upload-row">
+        <div class="sw-config-label">Eigene Ablauf-Musik <span style="font-size:11px;color:var(--text3)">(max 5 MB)</span></div>
+        <div style="display:flex;gap:8px;align-items:center;width:100%">
+          <label style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:7px 12px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;text-align:center">
+            📁 Datei wählen
+            <input type="file" id="sw-warn-file" accept="audio/*" style="display:none" onchange="swLoadWarnBeep(this)">
+          </label>
+          <button id="sw-warn-clear" onclick="swClearWarnBeep()" style="display:none;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer">✕</button>
+        </div>
+        <div id="sw-warn-name" style="font-size:11px;color:var(--accent);display:none"></div>
+        <div style="font-size:11px;color:var(--text3)">Kein Upload → eingebautes Tick-Tack</div>
       </div>
 
     </div>
@@ -5981,14 +6189,3 @@ function swClearCustomBeep() {
 
 </body>
 </html>
-// Spieler-Marker durchschalten: normal → weak (⚖) → pro (★) → normal
-function cyclePersonMarker(id) {
-  const list = getCurrentList(); if (!list) return;
-  const p = list.persons.find(x => x.id === id); if (!p) return;
-  if (!p.weak && !p.pro) { p.weak = true; p.pro = false; toast('⚖ ' + p.name + ' → Überzahl-Team'); }
-  else if (p.weak)        { p.weak = false; p.pro = true;  toast('★ ' + p.name + ' → Pro (getrennt halten)'); }
-  else                    { p.weak = false; p.pro = false;  toast('○ ' + p.name + ' → Normal'); }
-  save();
-  renderPersons();
-}
-
