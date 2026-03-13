@@ -1118,6 +1118,34 @@
     display:flex; align-items:center; gap:12px;
     padding:6px 0;
   }
+  /* Time adjuster buttons */
+  .sw-adj-btn {
+    width:44px; height:36px;
+    background:var(--surface2); border:1.5px solid var(--border);
+    border-radius:10px; font-size:13px; font-weight:800;
+    color:var(--accent); cursor:pointer; transition:all .15s;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .sw-adj-btn:active { transform:scale(0.92); background:rgba(79,127,255,0.15); }
+  /* Big time input for time setter */
+  .sw-big-input {
+    width:68px !important; height:60px !important;
+    font-size:32px !important; font-weight:800 !important;
+    text-align:center; border-radius:14px !important;
+    background:var(--surface) !important;
+    border:2px solid var(--border) !important;
+    color:var(--text) !important;
+  }
+  .sw-big-input:focus { border-color:var(--accent) !important; outline:none; }
+  /* Quick preset buttons */
+  .sw-preset-btn {
+    padding:6px 12px; background:var(--surface2);
+    border:1.5px solid var(--border); border-radius:20px;
+    font-size:12px; font-weight:700; color:var(--text2);
+    cursor:pointer; transition:all .15s;
+  }
+  .sw-preset-btn:active { background:rgba(79,127,255,0.15); border-color:var(--accent); color:var(--accent); }
+
   .sw-config-row + .sw-config-row { border-top:1px solid rgba(255,255,255,0.04); }
   .sw-config-label { font-size:14px; font-weight:600; color:var(--text2); flex:1; }
   .sw-config-sub   { font-size:12px; color:var(--text3); }
@@ -5543,36 +5571,48 @@ function swSetMode(mode) {
   if (_sw.running) return;
   _sw.mode = mode;
   swReset();
-  document.getElementById('sw-btn-countup'  ).classList.toggle('active', mode === 'up');
-  document.getElementById('sw-btn-countdown').classList.toggle('active', mode === 'down');
-  // Config-Zeilen ein/ausblenden
-  document.getElementById('sw-row-cdstart'      ).style.display = mode === 'down' ? 'flex' : 'none';
-  document.getElementById('sw-row-limit-toggle' ).style.display = mode === 'up'   ? 'flex' : 'none';
-  document.getElementById('sw-row-limit-inputs' ).style.display = 'none';
+  document.getElementById('sw-btn-countup'  )?.classList.toggle('active', mode === 'up');
+  document.getElementById('sw-btn-countdown')?.classList.toggle('active', mode === 'down');
+  const cdRow = document.getElementById('sw-row-cdstart');
+  const limRow = document.getElementById('sw-row-limit-toggle');
+  const limIn  = document.getElementById('sw-row-limit-inputs');
+  if (cdRow)  cdRow.style.display  = mode === 'down' ? 'flex' : 'none';
+  if (limRow) limRow.style.display = mode === 'up'   ? 'flex' : 'none';
+  if (limIn)  limIn.style.display  = 'none';
+  // Update mode display labels
+  const modeLabel = document.getElementById('sw-mode-label');
+  if (modeLabel) modeLabel.textContent = mode === 'up' ? '▲ Count Up' : '▼ Count Down';
   swUpdateConfig();
 }
 
 // ── Config aktualisieren ─────────────────────────────────
 function swUpdateConfig() {
-  _sw.soundOn = document.getElementById('sw-sound-on').checked;
-  document.getElementById('sw-sound-btn').textContent = _sw.soundOn ? '🔔' : '🔕';
+  const soundOnEl = document.getElementById('sw-sound-on');
+  if (soundOnEl) _sw.soundOn = soundOnEl.checked;
+  const soundBtn = document.getElementById('sw-sound-btn');
+  if (soundBtn) soundBtn.textContent = _sw.soundOn ? '🔔' : '🔕';
+  const soundPanelBtn = document.getElementById('sw-panel-sound');
+  if (soundPanelBtn) soundPanelBtn.textContent = _sw.soundOn ? '🔔' : '🔕';
 
-  const limitOn = document.getElementById('sw-limit-on').checked && _sw.mode === 'up';
-  document.getElementById('sw-row-limit-inputs').style.display = limitOn ? 'flex' : 'none';
+  const limitOnEl = document.getElementById('sw-limit-on');
+  const limitOn = limitOnEl && limitOnEl.checked && _sw.mode === 'up';
+  const limitRow = document.getElementById('sw-row-limit-inputs');
+  if (limitRow) limitRow.style.display = limitOn ? 'flex' : 'none';
 
   if (limitOn) {
-    const m = Math.max(0, parseInt(document.getElementById('sw-lim-min').value) || 0);
-    const s = Math.max(0, parseInt(document.getElementById('sw-lim-sec').value) || 0);
+    const m = Math.max(0, parseInt(document.getElementById('sw-lim-min')?.value) || 0);
+    const s = Math.max(0, parseInt(document.getElementById('sw-lim-sec')?.value) || 0);
     _sw.limitMs = (m * 60 + s) * 1000;
   } else {
     _sw.limitMs = 0;
   }
   swRender();
+  swUpdateAudioSummary();
 }
 
 function swToggleSound() {
   const el = document.getElementById('sw-sound-on');
-  el.checked = !el.checked;
+  if (el) el.checked = !el.checked;
   swUpdateConfig();
 }
 
@@ -5608,6 +5648,7 @@ function swReset() {
   _sw.laps     = [];
   _sw.lastLapMs = 0;
   swClearLaps();
+  swRenderTimeDisplay();
   swRender();
   swUpdateFab();
 }
@@ -5798,12 +5839,26 @@ function swRender() {
     const hasTime   = curMs > 10;
     mainBtn.textContent = isRunning ? '⏸ Pause' : (hasTime ? '▶ Weiter' : '▶ Start');
     mainBtn.className   = 'sw-btn ' + (isRunning ? 'sw-btn-pause' : 'sw-btn-start');
-    // Deaktivieren wenn Countdown fertig
     mainBtn.disabled = (state === 'finished' && _sw.mode === 'down');
   }
   if (lapBtn) {
     lapBtn.style.display = (_sw.mode === 'up' && _sw.running) ? 'flex' : 'none';
   }
+
+  // Show/hide time-setter based on mode and running state
+  const timeSetter = document.getElementById('sw-time-setter');
+  if (timeSetter) {
+    timeSetter.style.display = (_sw.mode === 'down' && !_sw.running) ? 'block' : 'none';
+  }
+
+  // Show/hide limit toggle (only in up mode)
+  const limitToggleRow = document.getElementById('sw-row-limit-toggle');
+  if (limitToggleRow) limitToggleRow.style.display = _sw.mode === 'up' ? 'flex' : 'none';
+  const limitInputRow = document.getElementById('sw-row-limit-inputs');
+  if (limitInputRow && _sw.mode === 'down') limitInputRow.style.display = 'none';
+
+  // Update audio summary badge
+  swUpdateAudioSummary();
 }
 
 // ── Rundenzeiten rendern ─────────────────────────────────
@@ -5943,6 +5998,7 @@ function swPanelOpen() {
   const row = document.getElementById('sw-warn-upload-row');
   if (row) row.style.opacity = _sw.warnSecs === 0 ? '0.4' : '1';
   swRender();
+  swRenderTimeDisplay();
 }
 function swPanelClose() {
   const panel = document.getElementById('sw-panel');
@@ -6000,17 +6056,6 @@ function cyclePersonMarker(id) {
 }
 
 // ── Stoppuhr FAB ──────────────────────────────────────────
-function swPanelOpen() {
-  const fab   = document.getElementById('sw-fab');
-  const panel = document.getElementById('sw-panel');
-  if (fab)   fab.style.display = 'flex';
-  if (panel) {
-    panel.style.display = 'flex';
-    panel.offsetHeight; // force reflow
-    requestAnimationFrame(() => panel.classList.add('open'));
-  }
-  swRender();
-}
 function swPanelClose() {
   const panel = document.getElementById('sw-panel');
   if (panel) {
@@ -6055,6 +6100,73 @@ function swClearCustomBeep() {
 
 
 // Ablauf-Warnung: Sekunden in 5er-Schritten (0, 5, 10, 15, 20, 25, 30)
+// ── Zeit per +/- einstellen ──────────────────────────────
+function swAdjustTime(field, delta) {
+  // field: 'cd-min' | 'cd-sec' | 'lim-min' | 'lim-sec'
+  const el = document.getElementById('sw-' + field);
+  if (!el) return;
+  const max = field.endsWith('sec') ? 59 : 99;
+  let val = (parseInt(el.value) || 0) + delta;
+  if (val < 0) val = 0;
+  if (val > max) val = max;
+  el.value = val;
+  swUpdateConfig();
+  swRenderTimeDisplay();
+}
+
+// Render the big time display from inputs (when stopped)
+function swRenderTimeDisplay() {
+  if (_sw.running) return;
+  const display = document.getElementById('sw-time');
+  const milEl   = document.getElementById('sw-millis');
+  if (!display) return;
+  if (_sw.mode === 'down') {
+    const m = parseInt(document.getElementById('sw-cd-min')?.value) || 0;
+    const s = parseInt(document.getElementById('sw-cd-sec')?.value) || 0;
+    const ms = (m * 60 + s) * 1000;
+    display.textContent = swFmtMMSS(ms);
+    if (milEl) milEl.textContent = '.00';
+  }
+}
+
+function swSetPreset(min, sec) {
+  const minEl = document.getElementById('sw-cd-min');
+  const secEl = document.getElementById('sw-cd-sec');
+  if (minEl) minEl.value = min;
+  if (secEl) secEl.value = sec;
+  swUpdateConfig();
+  swRenderTimeDisplay();
+}
+
+function swToggleAudioSection() {
+  const section = document.getElementById('sw-audio-section');
+  const arrow   = document.getElementById('sw-audio-arrow');
+  const btn     = document.getElementById('sw-audio-toggle-btn');
+  if (!section) return;
+  const open = section.style.display === 'flex';
+  if (open) {
+    section.style.display = 'none';
+    if (arrow) arrow.style.transform = 'rotate(-90deg)';
+    if (btn) { btn.style.borderRadius = '12px'; btn.style.borderBottom = ''; }
+  } else {
+    section.style.display = 'flex';
+    section.style.flexDirection = 'column';
+    section.style.gap = '6px';
+    if (arrow) arrow.style.transform = 'rotate(0deg)';
+    if (btn) { btn.style.borderRadius = '12px 12px 0 0'; btn.style.borderBottom = '1px solid transparent'; }
+  }
+}
+
+function swUpdateAudioSummary() {
+  const el = document.getElementById('sw-audio-summary');
+  if (!el) return;
+  const parts = [];
+  if (_sw.soundOn) parts.push('🔔');
+  if (_sw.warnSecs > 0) parts.push('🎵 ' + _sw.warnSecs + 's');
+  if (_sw.warnBeepName) parts.push(_sw.warnBeepName.split('.')[0].slice(0,12));
+  el.textContent = parts.join(' · ');
+}
+
 function swWarnSecsChange(delta) {
   const steps = [0, 5, 10, 15, 20, 25, 30];
   const cur = steps.indexOf(_sw.warnSecs);
@@ -6116,6 +6228,189 @@ function swClearWarnBeep() {
 
 <!-- ══ STOPPUHR FLOATING PANEL ══ -->
 <div id="sw-panel">
+
+  <!-- Header -->
+  <div class="sw-panel-header">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:17px">⏱</span>
+      <span class="sw-panel-title">Stoppuhr</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px">
+      <button id="sw-panel-sound" onclick="swToggleSound()" title="Ton an/aus"
+        style="background:none;border:none;font-size:18px;cursor:pointer;padding:4px 6px;border-radius:8px;transition:background .15s"
+        onmouseover="this.style.background='rgba(255,255,255,0.07)'" onmouseout="this.style.background='none'">🔔</button>
+      <button class="sw-panel-close" onclick="swPanelClose()">✕</button>
+    </div>
+  </div>
+
+  <div class="sw-panel-body sw-panel">
+
+    <!-- ── MODE TOGGLE ── -->
+    <div class="sw-mode-toggle" style="margin-bottom:4px">
+      <button class="sw-mode-btn active" id="sw-btn-countup"   onclick="swSetMode('up')">▲ Up</button>
+      <button class="sw-mode-btn"        id="sw-btn-countdown" onclick="swSetMode('down')">▼ Down</button>
+    </div>
+
+    <!-- ── BIG TIMER DISPLAY ── -->
+    <div class="sw-display" id="sw-display">
+      <div id="sw-status-label" class="sw-status-label">Bereit</div>
+      <div style="display:flex;align-items:baseline;justify-content:center;line-height:1">
+        <span id="sw-time" class="sw-time">00:00</span>
+        <span id="sw-millis" class="sw-millis">.00</span>
+      </div>
+      <div class="sw-bar-wrap" id="sw-bar-wrap" style="display:none;margin-top:10px">
+        <div class="sw-bar" id="sw-bar" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- ── TIME SETTER (only visible when stopped, countdown mode) ── -->
+    <div id="sw-time-setter" style="display:none;margin:0 0 10px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);text-align:center;margin-bottom:8px">Startzeit einstellen</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px">
+        <!-- Minutes -->
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <button onclick="swAdjustTime('cd-min',1)" class="sw-adj-btn">▲</button>
+          <div style="position:relative">
+            <input class="sw-time-input sw-big-input" type="number" id="sw-cd-min" min="0" max="99" value="0" oninput="swUpdateConfig();swRenderTimeDisplay()">
+            <div style="position:absolute;bottom:-14px;left:0;right:0;text-align:center;font-size:9px;color:var(--text3);font-weight:600;letter-spacing:.05em">MIN</div>
+          </div>
+          <button onclick="swAdjustTime('cd-min',-1)" class="sw-adj-btn" style="margin-top:12px">▼</button>
+        </div>
+        <div style="font-size:32px;font-weight:900;color:var(--text2);line-height:1;margin-top:-8px">:</div>
+        <!-- Seconds -->
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <button onclick="swAdjustTime('cd-sec',5)" class="sw-adj-btn">▲</button>
+          <div style="position:relative">
+            <input class="sw-time-input sw-big-input" type="number" id="sw-cd-sec" min="0" max="59" value="30" oninput="swUpdateConfig();swRenderTimeDisplay()">
+            <div style="position:absolute;bottom:-14px;left:0;right:0;text-align:center;font-size:9px;color:var(--text3);font-weight:600;letter-spacing:.05em">SEK</div>
+          </div>
+          <button onclick="swAdjustTime('cd-sec',-5)" class="sw-adj-btn" style="margin-top:12px">▼</button>
+        </div>
+      </div>
+      <!-- Quick presets -->
+      <div style="display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap">
+        <button onclick="swSetPreset(1,0)"  class="sw-preset-btn">1:00</button>
+        <button onclick="swSetPreset(2,0)"  class="sw-preset-btn">2:00</button>
+        <button onclick="swSetPreset(5,0)"  class="sw-preset-btn">5:00</button>
+        <button onclick="swSetPreset(10,0)" class="sw-preset-btn">10:00</button>
+        <button onclick="swSetPreset(0,30)" class="sw-preset-btn">0:30</button>
+        <button onclick="swSetPreset(0,45)" class="sw-preset-btn">0:45</button>
+      </div>
+    </div>
+
+    <!-- ── ZEITLIMIT (Count-Up mode) ── -->
+    <div id="sw-row-limit-toggle" style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:8px">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text)">Zeitlimit</div>
+        <div style="font-size:11px;color:var(--text3)">Alarm wenn erreicht</div>
+      </div>
+      <label class="sw-toggle">
+        <input type="checkbox" id="sw-limit-on" onchange="swUpdateConfig()">
+        <div class="sw-toggle-track"></div><div class="sw-toggle-thumb"></div>
+      </label>
+    </div>
+    <div id="sw-row-limit-inputs" style="display:none;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:8px">
+      <div style="font-size:12px;color:var(--text2);font-weight:600">Limit</div>
+      <div class="sw-time-inputs">
+        <input class="sw-time-input" type="number" id="sw-lim-min" min="0" max="99" value="5" oninput="swUpdateConfig()">
+        <span class="sw-time-sep">:</span>
+        <input class="sw-time-input" type="number" id="sw-lim-sec" min="0" max="59" value="0" oninput="swUpdateConfig()">
+      </div>
+    </div>
+
+    <!-- ── CONTROLS ── -->
+    <div class="sw-controls">
+      <button class="sw-btn sw-btn-start" id="sw-btn-main" onclick="swStartPause()">▶ Start</button>
+      <button class="sw-btn sw-btn-lap"   id="sw-btn-lap"  onclick="swLap()" title="Runde">⚑</button>
+      <button class="sw-btn sw-btn-reset"                  onclick="swReset()" title="Reset">↺</button>
+    </div>
+
+    <!-- ── AUDIO SETTINGS (collapsible) ── -->
+    <div style="margin-top:8px">
+      <button onclick="swToggleAudioSection()" id="sw-audio-toggle-btn"
+        style="width:100%;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px 14px;cursor:pointer;transition:background .15s"
+        onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='var(--surface2)'">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:14px">🎵</span>
+          <span style="font-size:12px;font-weight:700;color:var(--text)">Audio-Einstellungen</span>
+          <span id="sw-audio-summary" style="font-size:11px;color:var(--text3)"></span>
+        </div>
+        <span id="sw-audio-arrow" style="color:var(--text3);font-size:12px;transition:transform .2s;transform:rotate(-90deg)">▼</span>
+      </button>
+
+      <div id="sw-audio-section" style="display:none;padding:8px 2px 2px;flex-direction:column;gap:6px">
+
+        <!-- Signalton -->
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+          <div style="padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border)">🔔 Signalton bei Spielende</div>
+          <div style="padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text)">Aktiviert</div>
+              <div style="font-size:11px;color:var(--text3)">Horn + Beeps</div>
+            </div>
+            <label class="sw-toggle">
+              <input type="checkbox" id="sw-sound-on" checked onchange="swUpdateConfig()">
+              <div class="sw-toggle-track"></div><div class="sw-toggle-thumb"></div>
+            </label>
+          </div>
+          <div style="padding:0 14px 12px">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Eigener Ton <span style="color:var(--text3);opacity:.7">(max 5 MB · gespeichert)</span></div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;background:var(--surface);border:1.5px dashed var(--border);border-radius:10px;padding:7px;font-size:11px;font-weight:600;color:var(--accent);cursor:pointer">
+                📂 Datei wählen
+                <input type="file" id="sw-beep-file" accept="audio/*" style="display:none" onchange="swLoadCustomBeep(this)">
+              </label>
+              <button id="sw-beep-clear" onclick="swClearCustomBeep()" style="display:none;background:rgba(239,68,68,0.1);border:1.5px solid var(--danger);color:var(--danger);border-radius:10px;padding:7px 11px;font-size:13px;font-weight:700;cursor:pointer">✕</button>
+            </div>
+            <div id="sw-beep-name" style="display:none;margin-top:5px;font-size:11px;color:var(--accent);background:rgba(79,127,255,0.08);border-radius:8px;padding:3px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+          </div>
+        </div>
+
+        <!-- Ablauf-Musik -->
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+          <div style="padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border)">🎵 Ablauf-Musik</div>
+          <div style="padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text)">Vorlauf</div>
+              <div style="font-size:11px;color:var(--text3)">Musik startet N Sek. vor Ende</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px">
+              <button onclick="swWarnSecsChange(-5)" style="width:30px;height:30px;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;color:var(--text)">−</button>
+              <div style="min-width:40px;text-align:center;font-size:14px;font-weight:800;color:var(--accent);background:rgba(79,127,255,0.1);border-radius:8px;padding:3px 5px"><span id="sw-warn-secs-lbl">10s</span></div>
+              <button onclick="swWarnSecsChange(+5)" style="width:30px;height:30px;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;color:var(--text)">+</button>
+            </div>
+          </div>
+          <div id="sw-warn-upload-row" style="padding:0 14px 12px">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Eigene Musik <span style="opacity:.7">(max 5 MB · gespeichert)</span></div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;background:var(--surface);border:1.5px dashed var(--border);border-radius:10px;padding:7px;font-size:11px;font-weight:600;color:var(--accent);cursor:pointer">
+                📂 Datei wählen
+                <input type="file" id="sw-warn-file" accept="audio/*" style="display:none" onchange="swLoadWarnBeep(this)">
+              </label>
+              <button id="sw-warn-clear" onclick="swClearWarnBeep()" style="display:none;background:rgba(239,68,68,0.1);border:1.5px solid var(--danger);color:var(--danger);border-radius:10px;padding:7px 11px;font-size:13px;font-weight:700;cursor:pointer">✕</button>
+            </div>
+            <div id="sw-warn-name" style="display:none;margin-top:5px;font-size:11px;color:var(--accent);background:rgba(79,127,255,0.08);border-radius:8px;padding:3px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+            <div style="margin-top:5px;font-size:10px;color:var(--text3)">Kein Upload → eingebautes Tick-Tack</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Rundenzeiten -->
+    <div class="sw-laps" id="sw-laps-wrap">
+      <div class="sw-laps-header">
+        <span class="sw-laps-title">Rundenzeiten</span>
+        <button class="sw-btn-clear-laps" onclick="swClearLaps()">✕</button>
+      </div>
+      <div id="sw-laps-list"></div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
   <div class="sw-panel-header">
     <span style="font-size:18px">⏱</span>
     <span class="sw-panel-title">Stoppuhr</span>
