@@ -2060,7 +2060,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-N';
+const BUILD_VERSION = 'v2026-03-13-A';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2262,8 +2262,10 @@ function showAuthLoading(msg) {
 }
 function hideAuthLoading() {
   const el = document.getElementById('auth-loading');
-  if (el) el.classList.remove('show');
+  if (el) { el.classList.remove('show'); el.style.display = 'none'; }
 }
+// Sicherheitsnetz: auth-loading kann NIE länger als 4s oben bleiben
+setTimeout(() => hideAuthLoading(), 4000);
 
 // ── Sicheres Login+Load: Spinner wird IMMER beendet ──
 async function _doLoginAndShow(user, token) {
@@ -2282,6 +2284,7 @@ async function _doLoginAndShow(user, token) {
     showApp(user);
     renderLists();
     showScreen('screen-lists');
+    hideAuthLoading(); // ← sicher stellen dass Overlay weg ist
     dbg('✅ App bereit: ' + user.email, 'ok');
 
     // Geteilte Gruppen + Einladungen laden (mit Timeout-Schutz)
@@ -2323,6 +2326,8 @@ async function _doLoginAndShow(user, token) {
 
 // ── Show / Hide screens ──
 function showAuthScreen() {
+  hideAuthLoading();
+  showScreen('screen-auth');
   document.getElementById('screen-auth').style.display = 'flex';
   // Avatar ausblenden
   const avatarBtn = document.getElementById('user-avatar-btn');
@@ -2372,7 +2377,7 @@ function showApp(user) {
     });
   }
   _currentUserId = user.id;
-  document.getElementById('screen-auth').style.display = 'none';
+  // screen-auth über showScreen ausgeblendet – kein direktes style.display
   hideAuthLoading();
   const btn = document.getElementById('user-avatar-btn');
   if (btn) {
@@ -2791,7 +2796,7 @@ async function initApp() {
   if (!_sb) {
     dbg('Supabase NICHT konfiguriert → localStorage-Modus', 'warn');
     loadLocal();
-    document.getElementById('screen-auth').style.display = 'none';
+    // screen-auth über showScreen ausgeblendet – kein direktes style.display
     renderLists();
     return;
   }
@@ -3020,8 +3025,11 @@ let _currentUserEmail = null;
 function _setUserEmail(email) { _currentUserEmail = email; }
 
 // ── Geteilte Gruppen laden ──
+let _sgLoading = false;
 async function loadSharedGroups() {
   if (!_currentUserId || !_currentToken) return;
+  if (_sgLoading) { dbg('loadSharedGroups: bereits aktiv, überspringe', 'info'); return; }
+  _sgLoading = true;
   dbg('Lade geteilte Gruppen…', 'info');
   try {
     // Meine Mitgliedschaften laden
@@ -3062,6 +3070,8 @@ async function loadSharedGroups() {
   } catch(e) {
     dbg('loadSharedGroups Fehler: ' + e.message, 'err');
     dbg(e.stack?.substring(0,100) || '', 'err');
+  } finally {
+    _sgLoading = false;
   }
 }
 
@@ -5344,7 +5354,7 @@ function swRender() {
   if (!timeEl) return;
 
   // Zeit
-  timeEl.textContent = swFmtMMSS(ms);
+  timeEl.textContent = swFmtMMSS(ms); // kein führender Punkt
   milEl.textContent  = swFmtMs(ms);
 
   // Zustand bestimmen
@@ -5509,7 +5519,7 @@ document.addEventListener('touchstart', function _swAudioUnlock() {
     <!-- Main Display -->
     <div class="sw-display" id="sw-display">
       <div style="display:flex;align-items:baseline;justify-content:center;gap:0">
-        <span id="sw-time"   class="sw-time">.00:00</span>
+        <span id="sw-time"   class="sw-time">00:00</span>
         <span id="sw-millis" class="sw-millis">.00</span>
       </div>
       <div id="sw-status-label" class="sw-status-label">Bereit</div>
