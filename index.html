@@ -685,11 +685,14 @@
 
   /* ══ AUTH SCREEN ══ */
   #screen-auth {
-    position: fixed; inset: 0; z-index: 1000;
+    /* KEIN position:fixed mehr – showScreen() verwaltet display */
     background: var(--bg);
     display: none; flex-direction: column;
     align-items: center; justify-content: center;
-    padding: 32px 20px;
+    padding: 32px 20px; min-height: 100vh;
+  }
+  #screen-auth.active {
+    display: flex;
   }
   .auth-card {
     width: 100%; max-width: 380px;
@@ -2060,7 +2063,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-13-B';
+const BUILD_VERSION = 'v2026-03-13-C';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2347,9 +2350,10 @@ async function _doLoginAndShow(user, token) {
 
 // ── Show / Hide screens ──
 function showAuthScreen() {
+  dbg('showAuthScreen aufgerufen', 'info');
   hideAuthLoading();
   showScreen('screen-auth');
-  document.getElementById('screen-auth').style.display = 'flex';
+  // style.display wird von showScreen() verwaltet – hier nicht mehr nötig
   // Avatar ausblenden
   const avatarBtn = document.getElementById('user-avatar-btn');
   if (avatarBtn) avatarBtn.style.display = 'none';
@@ -2398,8 +2402,11 @@ function showApp(user) {
     });
   }
   _currentUserId = user.id;
-  // screen-auth über showScreen ausgeblendet – kein direktes style.display
+  // screen-auth explizit verstecken (style.display Priorität > CSS-Klasse)
+  const authScr = document.getElementById('screen-auth');
+  if (authScr) { authScr.style.display = 'none'; authScr.classList.remove('active'); }
   hideAuthLoading();
+  dbg('showApp: screen-auth=' + (authScr?.style.display||'?') + ' auth-loading=' + (document.getElementById('auth-loading')?.style.display||'?'), 'info');
   const btn = document.getElementById('user-avatar-btn');
   if (btn) {
     btn.style.display = 'flex';
@@ -3661,10 +3668,12 @@ window.addEventListener('unhandledrejection', (e) => {
   dbg('Unhandled Promise Rejection: ' + (e.reason?.message || e.reason), 'err');
   // Falls Loading-Spinner aktiv → beenden und Auth-Screen zeigen
   const loading = document.getElementById('auth-loading');
-  if (loading && loading.classList.contains('show')) {
-    dbg('→ Spinner-Fallback: zeige Login-Screen', 'warn');
-    hideAuthLoading();
-    if (!_currentUserId) showAuthScreen();
+  hideAuthLoading(); // immer den Spinner beenden
+  if (!_currentUserId) {
+    dbg('→ Unhandled Rejection: kein User → zeige Login-Screen', 'warn');
+    showAuthScreen();
+  } else {
+    dbg('→ Unhandled Rejection: User eingeloggt → behalte aktuellen Screen', 'warn');
   }
 });
 
@@ -3678,11 +3687,46 @@ initApp();
 function showScreen(id) {
   const target = document.getElementById(id);
   if (!target) {
-    dbg('showScreen FEHLER: Element "' + id + '" nicht gefunden!', 'err');
+    dbg('showScreen FEHLER: Element "' + id + '" nicht gefunden! id=' + id, 'err');
     return;
   }
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  // Alle screens deaktivieren — auch inline style.display zurücksetzen
+  document.querySelectorAll('.screen').forEach(s => {
+    s.classList.remove('active');
+    s.style.display = '';       // inline style löschen → CSS-Klasse greift
+    s.style.visibility = '';
+    s.style.zIndex = '';
+  });
+  // Ziel-Screen aktivieren
   target.classList.add('active');
+  target.style.display = '';    // CSS .screen.active { display:flex } greift jetzt
+
+  // Debug: sofort prüfen ob Screen sichtbar ist
+  requestAnimationFrame(() => {
+    const rect = target.getBoundingClientRect();
+    const cs   = window.getComputedStyle(target);
+    const ok   = rect.width > 10 && rect.height > 10;
+    dbg('showScreen("' + id + '"): display=' + cs.display + ' size=' + Math.round(rect.width) + 'x' + Math.round(rect.height) + (ok ? ' ✅' : ' ❌ SCHWARZ!'), ok ? 'ok' : 'err');
+    if (!ok) {
+      // Dump aller Screens
+      document.querySelectorAll('.screen').forEach(s => {
+        const r = s.getBoundingClientRect();
+        const c = window.getComputedStyle(s);
+        dbg('  #' + s.id + ': display=' + c.display + ' vis=' + c.visibility + ' inlineDisplay=' + (s.style.display||'leer') + ' active=' + s.classList.contains('active') + ' rect=' + Math.round(r.width) + 'x' + Math.round(r.height), 'err');
+      });
+      // Check: Was ist an Position (50%, 50%) des Screens?
+      const midX = window.innerWidth / 2, midY = window.innerHeight / 2;
+      const topEl = document.elementFromPoint(midX, midY);
+      if (topEl) dbg('  Element bei Mitte: <' + topEl.tagName + '> #' + (topEl.id||'?') + ' .' + (topEl.className||'?').substring(0,30), 'err');
+      // Alle fixed/sticky Elemente
+      ['auth-loading','debug-panel','toast'].forEach(eid => {
+        const el = document.getElementById(eid);
+        if (!el) return;
+        const ec = window.getComputedStyle(el);
+        if (ec.display !== 'none') dbg('  AKTIVES OVERLAY: #' + eid + ' display=' + ec.display + ' z=' + ec.zIndex, 'err');
+      });
+    }
+  });
   // Prüfe ob Screen wirklich sichtbar ist
   requestAnimationFrame(() => {
     const rect = target.getBoundingClientRect();
@@ -3760,7 +3804,7 @@ function renderLists() {
     return;
   }
   const total = state.lists.length + _sharedGroups.length;
-  dbg('renderLists: ' + state.lists.length + ' lokal + ' + _sharedGroups.length + ' geteilt = ' + total, 'info');
+  dbg('renderLists: ' + state.lists.length + ' lokal + ' + _sharedGroups.length + ' geteilt = ' + total + ' | currentScreen=' + (document.querySelector('.screen.active')?.id||'?'), 'info');
   if (gc) gc.textContent = total ? total + ' Gruppen' : '';
   if (!total) {
     empty.style.display = 'block'; container.innerHTML = ''; return;
