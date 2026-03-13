@@ -983,6 +983,200 @@
   .share-btn { background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--text2); padding: 6px 12px; font-size: 13px; font-family: Outfit,sans-serif; cursor: pointer; display: flex; align-items: center; gap: 6px; }
   .share-btn:hover { border-color: var(--accent); color: var(--accent); }
   .reader-lock { opacity: 0.4; pointer-events: none; }
+
+  /* ══════════════════════════════════════════
+     STOPPUHR
+  ══════════════════════════════════════════ */
+  #screen-stopwatch { display:none; flex-direction:column; height:100%; background:var(--bg); }
+
+  .sw-header {
+    display:flex; align-items:center; gap:12px;
+    padding:16px 20px 12px;
+    border-bottom:1px solid var(--border);
+    flex-shrink:0;
+  }
+  .sw-header h1 { font-size:18px; font-weight:800; flex:1; margin:0; }
+  .sw-sound-btn {
+    font-size:20px; cursor:pointer; padding:6px 10px;
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:10px; line-height:1; user-select:none;
+  }
+
+  .sw-body {
+    flex:1; overflow-y:auto; padding:20px;
+    display:flex; flex-direction:column; gap:14px;
+  }
+
+  /* ── Mode Toggle ── */
+  .sw-mode-toggle {
+    display:flex; background:var(--surface);
+    border-radius:12px; padding:4px; gap:4px;
+    border:1px solid var(--border);
+  }
+  .sw-mode-btn {
+    flex:1; padding:10px 0; border:none; border-radius:9px;
+    font-family:Outfit,sans-serif; font-size:14px; font-weight:700;
+    cursor:pointer; transition:all .2s;
+    color:var(--text3); background:transparent;
+  }
+  .sw-mode-btn.active {
+    background:var(--accent); color:#fff;
+    box-shadow:0 2px 10px rgba(79,127,255,0.35);
+  }
+
+  /* ── Main Display ── */
+  .sw-display {
+    background:var(--surface); border:2px solid var(--border);
+    border-radius:22px; padding:28px 20px 22px;
+    text-align:center; position:relative; overflow:hidden;
+    transition:border-color .3s, box-shadow .3s;
+  }
+  .sw-display::before {
+    content:''; position:absolute; inset:0; opacity:0;
+    transition:opacity .4s;
+    background:radial-gradient(ellipse at 50% 0%, rgba(79,127,255,0.08) 0%, transparent 70%);
+  }
+  .sw-display.running { border-color:var(--accent); }
+  .sw-display.running::before { opacity:1; }
+  .sw-display.warning { border-color:#f59e0b; box-shadow:0 0 0 2px rgba(245,158,11,0.15); animation:swWarn 1.2s ease-in-out infinite; }
+  .sw-display.finished { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.2); }
+  @keyframes swWarn { 0%,100%{box-shadow:0 0 0 2px rgba(245,158,11,0.15)} 50%{box-shadow:0 0 0 6px rgba(245,158,11,0.25)} }
+
+  .sw-time {
+    font-size:72px; font-weight:800; letter-spacing:-3px;
+    font-variant-numeric:tabular-nums;
+    color:var(--text); line-height:1;
+    transition:color .3s;
+  }
+  .sw-time.warning { color:#f59e0b; }
+  .sw-time.finished { color:#10b981; }
+
+  .sw-millis {
+    display:inline-block; font-size:30px; font-weight:700;
+    color:var(--text3); letter-spacing:-1px;
+    vertical-align:baseline; margin-left:2px;
+    font-variant-numeric:tabular-nums;
+    transition:color .3s;
+  }
+  .sw-millis.warning { color:#f59e0b; }
+  .sw-millis.finished { color:#10b981; }
+
+  .sw-status-label {
+    font-size:12px; font-weight:700; color:var(--text3);
+    text-transform:uppercase; letter-spacing:.1em;
+    margin-top:10px;
+    transition:color .3s;
+  }
+  .sw-status-label.warning { color:#f59e0b; }
+  .sw-status-label.finished { color:#10b981; }
+
+  /* Progress bar */
+  .sw-bar-wrap {
+    margin-top:14px; height:5px;
+    background:var(--surface2); border-radius:3px; overflow:hidden;
+  }
+  .sw-bar {
+    height:100%; border-radius:3px;
+    transition:width .1s linear, background .3s;
+    background:var(--accent);
+  }
+  .sw-bar.warning { background:#f59e0b; }
+  .sw-bar.finished { background:#10b981; }
+
+  /* ── Controls ── */
+  .sw-controls { display:flex; gap:10px; }
+  .sw-btn {
+    flex:1; padding:16px 10px; border:none; border-radius:14px;
+    font-family:Outfit,sans-serif; font-size:15px; font-weight:800;
+    cursor:pointer; transition:all .15s; min-height:56px;
+    letter-spacing:.01em;
+  }
+  .sw-btn:active { transform:scale(0.95); }
+  .sw-btn-start  { background:var(--accent); color:#fff; box-shadow:0 4px 14px rgba(79,127,255,0.35); }
+  .sw-btn-pause  { background:#f59e0b; color:#000; box-shadow:0 4px 14px rgba(245,158,11,0.3); }
+  .sw-btn-reset  { background:var(--surface2); color:var(--text2); border:1px solid var(--border); flex:0 0 56px; font-size:22px; border-radius:14px; }
+  .sw-btn-lap    { background:var(--surface2); color:var(--accent); border:1px solid rgba(79,127,255,0.3); flex:0 0 56px; font-size:18px; border-radius:14px; display:none; }
+
+  /* ── Config Card ── */
+  .sw-config {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:16px; padding:16px;
+  }
+  .sw-config-title {
+    font-size:11px; font-weight:700; color:var(--text3);
+    text-transform:uppercase; letter-spacing:.09em;
+    margin-bottom:14px;
+  }
+  .sw-config-row {
+    display:flex; align-items:center; gap:12px;
+    padding:6px 0;
+  }
+  .sw-config-row + .sw-config-row { border-top:1px solid rgba(255,255,255,0.04); }
+  .sw-config-label { font-size:14px; font-weight:600; color:var(--text2); flex:1; }
+  .sw-config-sub   { font-size:12px; color:var(--text3); }
+
+  .sw-time-inputs { display:flex; align-items:center; gap:6px; }
+  .sw-time-input {
+    width:54px; padding:9px 4px;
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:10px; color:var(--text);
+    font-family:Outfit,sans-serif; font-size:19px; font-weight:700;
+    text-align:center; transition:border-color .2s;
+    -moz-appearance:textfield;
+  }
+  .sw-time-input::-webkit-inner-spin-button,
+  .sw-time-input::-webkit-outer-spin-button { -webkit-appearance:none; }
+  .sw-time-input:focus { outline:none; border-color:var(--accent); background:rgba(79,127,255,0.07); }
+  .sw-time-sep { font-size:22px; font-weight:800; color:var(--text3); }
+
+  /* iOS-style toggle */
+  .sw-toggle { position:relative; width:46px; height:26px; flex-shrink:0; }
+  .sw-toggle input { opacity:0; width:0; height:0; position:absolute; }
+  .sw-toggle-track {
+    position:absolute; inset:0; background:var(--surface2);
+    border-radius:26px; cursor:pointer;
+    border:1px solid var(--border); transition:background .2s, border-color .2s;
+  }
+  .sw-toggle-thumb {
+    position:absolute; width:20px; height:20px;
+    left:2px; top:2px;
+    background:var(--text3); border-radius:50%;
+    transition:transform .2s, background .2s;
+    pointer-events:none;
+  }
+  .sw-toggle input:checked ~ .sw-toggle-track { background:var(--accent); border-color:var(--accent); }
+  .sw-toggle input:checked ~ .sw-toggle-thumb { transform:translateX(20px); background:#fff; }
+
+  /* ── Lap Times ── */
+  .sw-laps {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:16px; overflow:hidden; display:none;
+  }
+  .sw-laps-header {
+    padding:10px 16px;
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:1px solid var(--border);
+  }
+  .sw-laps-title { font-size:11px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.09em; }
+  .sw-btn-clear-laps {
+    background:none; border:none; color:var(--text3);
+    font-family:Outfit,sans-serif; font-size:12px; font-weight:600;
+    cursor:pointer; padding:4px 8px; border-radius:6px;
+  }
+  .sw-lap-row {
+    display:flex; align-items:center; padding:10px 16px;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+    font-size:13px; gap:8px;
+    transition:background .15s;
+  }
+  .sw-lap-row:last-child { border-bottom:none; }
+  .sw-lap-num   { color:var(--text3); font-weight:600; width:64px; flex-shrink:0; }
+  .sw-lap-time  { font-weight:800; color:var(--text); font-variant-numeric:tabular-nums; flex:1; }
+  .sw-lap-delta { font-size:12px; color:var(--text3); font-variant-numeric:tabular-nums; }
+  .sw-lap-row.sw-lap-best  .sw-lap-time { color:#10b981; }
+  .sw-lap-row.sw-lap-worst .sw-lap-time { color:#ff5050; }
+  .sw-lap-row.sw-lap-best  { background:rgba(16,185,129,0.04); }
+  .sw-lap-row.sw-lap-worst { background:rgba(255,80,80,0.04); }
 </style>
 </head>
 <body>
@@ -1247,6 +1441,14 @@
       </div>
     </div>
     <div class="action-rows">
+      <div class="action-row" onclick="openStopwatch()">
+        <div class="action-row-icon">⏱</div>
+        <div class="action-row-info">
+          <div class="action-row-title">Stoppuhr</div>
+          <div class="action-row-desc">Count-Up · Count-Down · Zeitlimit · Signalton</div>
+        </div>
+        <div class="action-row-arrow">›</div>
+      </div>
       <div class="action-row" onclick="openAction('pairs')">
         <div class="action-row-icon">🤝</div>
         <div class="action-row-info">
@@ -1858,7 +2060,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-01-M';
+const BUILD_VERSION = 'v2026-03-01-N';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -4974,6 +5176,421 @@ function toggleAdvancedSettings() {
 }
 
 
+
+
+// ══════════════════════════════════════════════════════════
+// STOPPUHR ENGINE
+// ══════════════════════════════════════════════════════════
+const _sw = {
+  mode:    'up',    // 'up' | 'down'
+  running: false,
+  startTs: 0,       // performance.now() beim letzten Start
+  elapsed: 0,       // akkumulierte ms (Summe aller Laufphasen)
+  limitMs: 0,       // 0 = kein Limit aktiv
+  soundOn: true,
+  interval: null,
+  laps: [],
+  lastLapMs: 0,
+  beeped: false,
+  audioCtx: null,
+};
+
+// ── Öffnen / Schließen ────────────────────────────────────
+function openStopwatch() {
+  showScreen('screen-stopwatch');
+  swRender();
+}
+function closeStopwatch() {
+  if (_sw.running) swStartPause(); // auto-pause beim Verlassen
+  goBack('screen-list-detail');
+}
+
+// ── Modus wechseln ───────────────────────────────────────
+function swSetMode(mode) {
+  if (_sw.running) return;
+  _sw.mode = mode;
+  swReset();
+  document.getElementById('sw-btn-countup'  ).classList.toggle('active', mode === 'up');
+  document.getElementById('sw-btn-countdown').classList.toggle('active', mode === 'down');
+  // Config-Zeilen ein/ausblenden
+  document.getElementById('sw-row-cdstart'      ).style.display = mode === 'down' ? 'flex' : 'none';
+  document.getElementById('sw-row-limit-toggle' ).style.display = mode === 'up'   ? 'flex' : 'none';
+  document.getElementById('sw-row-limit-inputs' ).style.display = 'none';
+  swUpdateConfig();
+}
+
+// ── Config aktualisieren ─────────────────────────────────
+function swUpdateConfig() {
+  _sw.soundOn = document.getElementById('sw-sound-on').checked;
+  document.getElementById('sw-sound-btn').textContent = _sw.soundOn ? '🔔' : '🔕';
+
+  const limitOn = document.getElementById('sw-limit-on').checked && _sw.mode === 'up';
+  document.getElementById('sw-row-limit-inputs').style.display = limitOn ? 'flex' : 'none';
+
+  if (limitOn) {
+    const m = Math.max(0, parseInt(document.getElementById('sw-lim-min').value) || 0);
+    const s = Math.max(0, parseInt(document.getElementById('sw-lim-sec').value) || 0);
+    _sw.limitMs = (m * 60 + s) * 1000;
+  } else {
+    _sw.limitMs = 0;
+  }
+  swRender();
+}
+
+function swToggleSound() {
+  const el = document.getElementById('sw-sound-on');
+  el.checked = !el.checked;
+  swUpdateConfig();
+}
+
+// ── Start / Pause ────────────────────────────────────────
+function swStartPause() {
+  if (_sw.running) {
+    _sw.elapsed += performance.now() - _sw.startTs;
+    _sw.running  = false;
+    clearInterval(_sw.interval);
+    _sw.interval = null;
+  } else {
+    // Im Countdown-Modus: erst starten wenn Startzeit > 0
+    if (_sw.mode === 'down' && swGetStartMs() === 0) return;
+    _sw.beeped   = false;
+    _sw.startTs  = performance.now();
+    _sw.running  = true;
+    _sw.interval = setInterval(swTick, 33); // ~30 fps
+  }
+  swRender();
+}
+
+// ── Reset ────────────────────────────────────────────────
+function swReset() {
+  clearInterval(_sw.interval);
+  _sw.interval = null;
+  _sw.running  = false;
+  _sw.elapsed  = 0;
+  _sw.startTs  = 0;
+  _sw.beeped   = false;
+  _sw.laps     = [];
+  _sw.lastLapMs = 0;
+  swClearLaps();
+  swRender();
+}
+
+// ── Runde ────────────────────────────────────────────────
+function swLap() {
+  if (!_sw.running) return;
+  const ms    = swCurrentMs();
+  const delta = ms - _sw.lastLapMs;
+  _sw.laps.unshift({ n: _sw.laps.length + 1, ms, delta });
+  _sw.lastLapMs = ms;
+  swRenderLaps();
+}
+function swClearLaps() {
+  _sw.laps = [];
+  _sw.lastLapMs = 0;
+  swRenderLaps();
+}
+
+// ── Zeitberechnungen ─────────────────────────────────────
+function swCurrentMs() {
+  return _sw.running
+    ? _sw.elapsed + (performance.now() - _sw.startTs)
+    : _sw.elapsed;
+}
+function swGetStartMs() {
+  const m = Math.max(0, parseInt(document.getElementById('sw-cd-min')?.value) || 0);
+  const s = Math.max(0, parseInt(document.getElementById('sw-cd-sec')?.value) || 0);
+  return (m * 60 + s) * 1000;
+}
+function swCountdownMs() {
+  return Math.max(0, swGetStartMs() - swCurrentMs());
+}
+function swDisplayMs() {
+  return _sw.mode === 'down' ? swCountdownMs() : swCurrentMs();
+}
+
+// ── Tick (33ms Interval) ─────────────────────────────────
+function swTick() {
+  swRender();
+
+  if (!_sw.beeped && _sw.soundOn) {
+    const reached = _sw.mode === 'up'
+      ? (_sw.limitMs > 0 && swCurrentMs() >= _sw.limitMs)
+      : (swCountdownMs() <= 0);
+    if (reached) { swBeep(); _sw.beeped = true; }
+  }
+
+  // Auto-Stop bei Countdown = 0
+  if (_sw.mode === 'down' && swCountdownMs() <= 0 && _sw.running) {
+    clearInterval(_sw.interval);
+    _sw.interval = null;
+    _sw.running  = false;
+    _sw.elapsed  = swGetStartMs(); // friert exakt bei 00:00 ein
+    swRender();
+  }
+}
+
+// ── Rendern ──────────────────────────────────────────────
+function swRender() {
+  const ms      = swDisplayMs();
+  const curMs   = swCurrentMs();
+  const display = document.getElementById('sw-display');
+  const timeEl  = document.getElementById('sw-time');
+  const milEl   = document.getElementById('sw-millis');
+  const lblEl   = document.getElementById('sw-status-label');
+  const barEl   = document.getElementById('sw-bar');
+  const barWrap = document.getElementById('sw-bar-wrap');
+  const mainBtn = document.getElementById('sw-btn-main');
+  const lapBtn  = document.getElementById('sw-btn-lap');
+  if (!timeEl) return;
+
+  // Zeit
+  timeEl.textContent = swFmtMMSS(ms);
+  milEl.textContent  = swFmtMs(ms);
+
+  // Zustand bestimmen
+  let state = 'idle';
+  if (_sw.mode === 'up' && _sw.limitMs > 0) {
+    if (curMs >= _sw.limitMs)              state = 'finished';
+    else if (curMs >= _sw.limitMs * 0.85)  state = 'warning';
+    else if (_sw.running)                  state = 'running';
+  } else if (_sw.mode === 'down') {
+    const rem = swCountdownMs();
+    if (rem <= 0)       state = 'finished';
+    else if (rem <= 10000) state = 'warning';
+    else if (_sw.running)  state = 'running';
+  } else if (_sw.running) {
+    state = 'running';
+  }
+
+  // Display-Klasse
+  display.className = 'sw-display' + (state !== 'idle' ? ' ' + state : '');
+  const colorCls    = (state === 'warning' || state === 'finished') ? ' ' + state : '';
+  timeEl.className  = 'sw-time'   + colorCls;
+  milEl.className   = 'sw-millis' + colorCls;
+  lblEl.className   = 'sw-status-label' + colorCls;
+
+  // Status-Label
+  const labels = {
+    idle:     'Bereit',
+    running:  _sw.mode === 'up' ? '▲ Läuft' : '▼ Läuft',
+    warning:  _sw.mode === 'up' ? '⚠ Fast am Limit' : '⚠ Fast vorbei',
+    finished: _sw.mode === 'up' ? '✅ Limit erreicht!' : '🏁 Zeit abgelaufen!'
+  };
+  lblEl.textContent = labels[state] || 'Bereit';
+
+  // Fortschrittsbalken
+  let pct = 0;
+  if (_sw.mode === 'up' && _sw.limitMs > 0) {
+    pct = Math.min(100, (curMs / _sw.limitMs) * 100);
+    barWrap.style.display = 'block';
+  } else if (_sw.mode === 'down') {
+    const start = swGetStartMs();
+    pct = start > 0 ? Math.max(0, (swCountdownMs() / start) * 100) : 0;
+    barWrap.style.display = 'block';
+  } else {
+    barWrap.style.display = 'none';
+  }
+  if (barEl) {
+    barEl.style.width = pct + '%';
+    barEl.className   = 'sw-bar' + colorCls;
+  }
+
+  // Buttons
+  if (mainBtn) {
+    const isRunning = _sw.running;
+    const hasTime   = curMs > 10;
+    mainBtn.textContent = isRunning ? '⏸ Pause' : (hasTime ? '▶ Weiter' : '▶ Start');
+    mainBtn.className   = 'sw-btn ' + (isRunning ? 'sw-btn-pause' : 'sw-btn-start');
+    // Deaktivieren wenn Countdown fertig
+    mainBtn.disabled = (state === 'finished' && _sw.mode === 'down');
+  }
+  if (lapBtn) {
+    lapBtn.style.display = (_sw.mode === 'up' && _sw.running) ? 'flex' : 'none';
+  }
+}
+
+// ── Rundenzeiten rendern ─────────────────────────────────
+function swRenderLaps() {
+  const wrap = document.getElementById('sw-laps-wrap');
+  const list = document.getElementById('sw-laps-list');
+  if (!wrap || !list) return;
+  if (_sw.laps.length === 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  const deltas  = _sw.laps.map(l => l.delta);
+  const fastest = Math.min(...deltas);
+  const slowest = Math.max(...deltas);
+
+  list.innerHTML = _sw.laps.map(l => {
+    const cls = _sw.laps.length > 2
+      ? (l.delta === fastest ? 'sw-lap-best' : l.delta === slowest ? 'sw-lap-worst' : '')
+      : '';
+    return `<div class="sw-lap-row ${cls}">
+      <span class="sw-lap-num">Runde&nbsp;${l.n}</span>
+      <span class="sw-lap-time">${swFmtMMSS(l.ms)}${swFmtMs(l.ms)}</span>
+      <span class="sw-lap-delta">+${swFmtMMSS(l.delta)}${swFmtMs(l.delta)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Formatierung ─────────────────────────────────────────
+function swFmtMMSS(ms) {
+  const t   = Math.floor(ms / 1000);
+  const min = Math.floor(t / 60);
+  const sec = t % 60;
+  return (min < 10 ? '0' : '') + min + ':' + (sec < 10 ? '0' : '') + sec;
+}
+function swFmtMs(ms) {
+  return '.' + String(Math.floor((ms % 1000) / 10)).padStart(2, '0');
+}
+
+// ── Akustisches Signal ───────────────────────────────────
+function swBeep() {
+  if (!_sw.soundOn) return;
+  try {
+    if (!_sw.audioCtx) {
+      _sw.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = _sw.audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    // 3 Töne: kurz, kurz, lang
+    const seq = [
+      { f: 660, t: 0,    d: 0.12 },
+      { f: 660, t: 0.18, d: 0.12 },
+      { f: 880, t: 0.36, d: 0.30 },
+    ];
+    seq.forEach(({ f, t, d }) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      gain.gain.setValueAtTime(0,   ctx.currentTime + t);
+      gain.gain.linearRampToValueAtTime(0.45, ctx.currentTime + t + 0.015);
+      gain.gain.linearRampToValueAtTime(0,    ctx.currentTime + t + d);
+      osc.start(ctx.currentTime + t);
+      osc.stop(ctx.currentTime  + t + d + 0.01);
+    });
+  } catch(e) { console.warn('swBeep Fehler:', e); }
+}
+
+// AudioContext auf erster User-Interaktion entsperren (Mobile-Fix)
+document.addEventListener('touchstart', function _swAudioUnlock() {
+  if (!_sw.audioCtx) {
+    try { _sw.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(_) {}
+  } else if (_sw.audioCtx.state === 'suspended') {
+    _sw.audioCtx.resume();
+  }
+  document.removeEventListener('touchstart', _swAudioUnlock);
+}, { passive: true });
+
 </script>
+
+<!-- ══════════════════════════════════════════
+     STOPPUHR SCREEN
+══════════════════════════════════════════ -->
+<div class="screen" id="screen-stopwatch">
+
+  <!-- Header -->
+  <div class="sw-header">
+    <button class="back-btn" onclick="closeStopwatch()" aria-label="Zurück">‹</button>
+    <h1>⏱ Stoppuhr</h1>
+    <button class="sw-sound-btn" id="sw-sound-btn" onclick="swToggleSound()" title="Ton ein/aus">🔔</button>
+  </div>
+
+  <div class="sw-body">
+
+    <!-- Mode Toggle -->
+    <div class="sw-mode-toggle">
+      <button class="sw-mode-btn active" id="sw-btn-countup"   onclick="swSetMode('up')">⬆ Count-Up</button>
+      <button class="sw-mode-btn"        id="sw-btn-countdown" onclick="swSetMode('down')">⬇ Count-Down</button>
+    </div>
+
+    <!-- Main Display -->
+    <div class="sw-display" id="sw-display">
+      <div style="display:flex;align-items:baseline;justify-content:center;gap:0">
+        <span id="sw-time"   class="sw-time">.00:00</span>
+        <span id="sw-millis" class="sw-millis">.00</span>
+      </div>
+      <div id="sw-status-label" class="sw-status-label">Bereit</div>
+      <div class="sw-bar-wrap" id="sw-bar-wrap" style="display:none">
+        <div class="sw-bar" id="sw-bar" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- Controls: Start/Pause | Runde | Reset -->
+    <div class="sw-controls">
+      <button class="sw-btn sw-btn-start" id="sw-btn-main"  onclick="swStartPause()">▶&nbsp;Start</button>
+      <button class="sw-btn sw-btn-lap"   id="sw-btn-lap"   onclick="swLap()"   title="Runde erfassen">⚑</button>
+      <button class="sw-btn sw-btn-reset"                   onclick="swReset()"  title="Zurücksetzen">↺</button>
+    </div>
+
+    <!-- Config -->
+    <div class="sw-config">
+      <div class="sw-config-title">⚙&nbsp; Einstellungen</div>
+
+      <!-- Count-Down Startzeit (nur bei Down-Modus) -->
+      <div class="sw-config-row" id="sw-row-cdstart" style="display:none">
+        <div>
+          <div class="sw-config-label">Startzeit</div>
+          <div class="sw-config-sub">Countdown beginnt ab</div>
+        </div>
+        <div class="sw-time-inputs">
+          <input class="sw-time-input" type="number" id="sw-cd-min" min="0" max="99" value="5" oninput="swUpdateConfig()">
+          <span class="sw-time-sep">:</span>
+          <input class="sw-time-input" type="number" id="sw-cd-sec" min="0" max="59" value="0"  oninput="swUpdateConfig()">
+        </div>
+      </div>
+
+      <!-- Zeitlimit Toggle (Count-Up) -->
+      <div class="sw-config-row" id="sw-row-limit-toggle">
+        <div>
+          <div class="sw-config-label">Zeitlimit</div>
+          <div class="sw-config-sub">Alarm wenn erreicht</div>
+        </div>
+        <label class="sw-toggle">
+          <input type="checkbox" id="sw-limit-on" onchange="swUpdateConfig()">
+          <div class="sw-toggle-track"></div>
+          <div class="sw-toggle-thumb"></div>
+        </label>
+      </div>
+
+      <!-- Zeitlimit Eingabe -->
+      <div class="sw-config-row" id="sw-row-limit-inputs" style="display:none">
+        <div class="sw-config-label sw-config-sub">Limit (Min : Sek)</div>
+        <div class="sw-time-inputs">
+          <input class="sw-time-input" type="number" id="sw-lim-min" min="0" max="99" value="5" oninput="swUpdateConfig()">
+          <span class="sw-time-sep">:</span>
+          <input class="sw-time-input" type="number" id="sw-lim-sec" min="0" max="59" value="0"  oninput="swUpdateConfig()">
+        </div>
+      </div>
+
+      <!-- Signalton Toggle -->
+      <div class="sw-config-row">
+        <div>
+          <div class="sw-config-label">Signalton</div>
+          <div class="sw-config-sub">Bei Limit / Zeit abgelaufen</div>
+        </div>
+        <label class="sw-toggle">
+          <input type="checkbox" id="sw-sound-on" checked onchange="swUpdateConfig()">
+          <div class="sw-toggle-track"></div>
+          <div class="sw-toggle-thumb"></div>
+        </label>
+      </div>
+
+    </div>
+
+    <!-- Rundenzeiten -->
+    <div class="sw-laps" id="sw-laps-wrap">
+      <div class="sw-laps-header">
+        <span class="sw-laps-title">Rundenzeiten</span>
+        <button class="sw-btn-clear-laps" onclick="swClearLaps()">✕ Leeren</button>
+      </div>
+      <div id="sw-laps-list"></div>
+    </div>
+
+  </div><!-- /sw-body -->
+</div><!-- /screen-stopwatch -->
+
 </body>
 </html>
