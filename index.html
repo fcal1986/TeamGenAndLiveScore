@@ -2176,7 +2176,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-13-F';
+const BUILD_VERSION = 'v2026-03-17-G';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2395,8 +2395,19 @@ function save() {
   const sharedId = list?._sharedGroupId || (isShared && list?.id);
   if (sharedId && _currentToken) {
     dbg('save(): geteilte Gruppe erkannt → saveSharedGroup in 1500ms (' + sharedId + ')', 'info');
-    if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
-    _saveDebounceTimer = setTimeout(() => saveSharedGroup(sharedId), 1500);
+    if (_saveDebounceTimer) {
+      clearTimeout(_saveDebounceTimer);
+      dbg('save(): bestehender Shared-Save Timer ersetzt (' + sharedId + ')', 'info');
+    }
+    _saveDebounceTimer = setTimeout(async () => {
+      _saveDebounceTimer = null;
+      dbg('save(): Shared-Save Timer ausgelöst (' + sharedId + ')', 'info');
+      try {
+        await saveSharedGroup(sharedId);
+      } catch (e) {
+        dbg('save(): Shared-Save Timer Fehler: ' + (e?.message || e), 'err');
+      }
+    }, 1500);
     return;
   }
   if (!_sb || !_currentUserId) {
@@ -2420,6 +2431,11 @@ async function flushSave() {
   const list = getCurrentList();
   const sharedId = list?._sharedGroupId || ((_sharedGroups && _sharedGroups.find(g => g.id === list?.id)) ? list?.id : null);
   if (sharedId && _currentToken) {
+    if (_saveDebounceTimer) {
+      clearTimeout(_saveDebounceTimer);
+      _saveDebounceTimer = null;
+      dbg('flushSave(): pending Shared-Save Timer sofort ausgeführt (' + sharedId + ')', 'info');
+    }
     try { await saveSharedGroup(sharedId); } catch(e) { dbg('Shared Flush Fehler: ' + e.message, 'err'); }
     return;
   }
@@ -3029,7 +3045,7 @@ async function initApp() {
   });
 
   // ── 2. Offline/online ──
-  window.addEventListener('online',  () => { if (_currentUserId) { setSyncStatus('saving'); saveToSupabase(); } });
+  window.addEventListener('online',  () => { if (_currentUserId) { dbg('online: Verbindung wieder da → flushSave()', 'info'); setSyncStatus('saving'); flushSave(); } });
   window.addEventListener('offline', () => { saveLocal(); setSyncStatus('offline'); });
   window.addEventListener('pagehide', () => { flushSave(); });
   window.addEventListener('beforeunload', () => { saveLocal(); });
@@ -3856,7 +3872,7 @@ async function saveSharedGroup(groupId) {
       dbg('Shared group save übersprungen | Grund: Rolle=' + sg.role + ' statt admin (' + groupId + ')', 'warn');
       return; // nur Admins dürfen speichern
     }
-    const data = { _v: 2, persons: list.persons, history: list.history, tournaments: list.tournaments };
+    const data = { _v: 3, _build: BUILD_VERSION, persons: list.persons, history: list.history, tournaments: list.tournaments };
     const res = await _shRest('PATCH', 'shared_groups',
       'id=eq.' + encodeURIComponent(groupId),
       { data, updated_at: new Date().toISOString(), updated_by: _currentUserId });
