@@ -2175,7 +2175,8 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-17-J';
+const BUILD_VERSION = 'v2026-03-17-K';
+const SHARED_ENABLED = false;
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2203,6 +2204,20 @@ let state = {
 let _sharedGroups = [];       // [{id, name, role, data, members, ...}]
 let _pendingInvitations = []; // Offene Einladungen für diesen User
 let _currentInvite = null;    // Aktuell angezeigte Einladung
+
+function stripSharedState() {
+  _sharedGroups = [];
+  _pendingInvitations = [];
+  _currentInvite = null;
+  if (!state || !Array.isArray(state.lists)) return;
+  state.lists.forEach(l => {
+    if (!l || typeof l !== 'object') return;
+    delete l._sharedGroupId;
+    delete l._sharedRole;
+    delete l.shared;
+    delete l.sharedGroupId;
+  });
+}
 
 function getList(id) { return state.lists.find(l => l.id === id); }
 function getCurrentList() { return getList(state.currentListId); }
@@ -2337,6 +2352,7 @@ async function loadFromSupabase(userId, opts = {}) {
     }
     dbg('DB: ' + bytes + ' bytes geladen ✅', 'ok');
     const ok = applyParsed(row.data);
+    if (ok && !SHARED_ENABLED) { stripSharedState(); saveLocal(false); }
     if (ok) _lastDbLoadTs = Date.now();
     return ok;
   } catch(e) {
@@ -2348,16 +2364,8 @@ async function loadFromSupabase(userId, opts = {}) {
 // save() – sofort lokal, nach 1.5s in Cloud
 function save() {
   window._lastActionTime = Date.now();
+  if (!SHARED_ENABLED) stripSharedState();
   saveLocal();
-  const list = getCurrentList();
-  // Geteilte Gruppe? → shared_groups updaten (nur Admins)
-  const isShared = list?._sharedGroupId || (_sharedGroups && _sharedGroups.find(g => g.id === list?.id));
-  const sharedId = list?._sharedGroupId || (isShared && list?.id);
-  if (sharedId && _currentToken) {
-    if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
-    _saveDebounceTimer = setTimeout(() => saveSharedGroup(sharedId), 1500);
-    return;
-  }
   if (!_sb || !_currentUserId) return;
   if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
   setSyncStatus('saving');
@@ -3199,12 +3207,17 @@ function _setUserEmail(email) { _currentUserEmail = email; }
 // ── Geteilte Gruppen laden ──
 let _sgLoading = false;
 async function loadSharedGroups() {
+  if (!SHARED_ENABLED) {
+    stripSharedState();
+    dbg('Shared-Funktion deaktiviert', 'warn');
+    renderLists();
+    return;
+  }
   if (!_currentUserId || !_currentToken) return;
   if (_sgLoading) { dbg('loadSharedGroups: bereits aktiv, überspringe', 'info'); return; }
   _sgLoading = true;
   dbg('Lade geteilte Gruppen…', 'info');
   try {
-    // Meine Mitgliedschaften laden
     const members = await _shRest('GET',
       'group_members',
       'user_id=eq.' + encodeURIComponent(_currentUserId) + '&select=group_id,role',
@@ -3212,10 +3225,9 @@ async function loadSharedGroups() {
     if (!members || members.length === 0) {
       _sharedGroups = [];
       renderLists();
-      await loadPendingInvitations(); // ← auch ohne Mitgliedschaft prüfen!
+      await loadPendingInvitations();
       return;
     }
-    // Gruppen-Daten laden
     const ids = members.map(m => m.group_id);
     const groups = await _shRest('GET',
       'shared_groups',
@@ -3228,7 +3240,6 @@ async function loadSharedGroups() {
       _hasNew: g.updated_by && g.updated_by !== _currentUserId
     }));
     dbg('Geteilte Gruppen: ' + _sharedGroups.length, 'ok');
-    // _sharedGroupId in lokale Listen zurückschreiben (nach Re-Login)
     _sharedGroups.forEach(sg => {
       const local = state.lists.find(l => l._sharedGroupId === sg.id || l.name === sg.name);
       if (local && !local._sharedGroupId) {
@@ -3237,7 +3248,6 @@ async function loadSharedGroups() {
       }
     });
     renderLists();
-    // Einladungen prüfen
     await loadPendingInvitations();
   } catch(e) {
     dbg('loadSharedGroups Fehler: ' + e.message, 'err');
@@ -3249,6 +3259,11 @@ async function loadSharedGroups() {
 
 // ── Offene Einladungen laden ──
 async function loadPendingInvitations() {
+  if (!SHARED_ENABLED) {
+    _pendingInvitations = [];
+    renderInvitationBanners();
+    return;
+  }
   const email = _currentUserEmail;
   if (!email || !_currentToken) {
     dbg('loadPendingInvitations: kein Email/Token (' + (email||'null') + ')', 'warn');
@@ -4037,6 +4052,7 @@ function undoDelete() {
 
 // ===================== LISTS =====================
 function renderLists() {
+  if (!SHARED_ENABLED) stripSharedState();
   const container = document.getElementById('lists-container');
   const empty = document.getElementById('lists-empty');
   const gc = document.getElementById('groups-count');
