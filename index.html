@@ -2099,11 +2099,10 @@
     if (toggle) toggle.style.display = 'flex';
     toggle && toggle.addEventListener('click', debugToggle);
 
-    dbg('=== SPIELR DEBUG ===', 'info');
+    dbg('=== SPIELR AUTH DEBUG ===', 'info');
     dbg('Umgebung: ' + env, 'info');
     dbg('URL: ' + window.location.href, 'info');
     dbg('UserAgent: ' + ua.substring(0, 80), 'info');
-    debugSaveReason('Initialer Save-Status');
 
     // Hash/Query-Parameter prüfen (OAuth Callback Tokens)
     const hash = window.location.hash;
@@ -2176,7 +2175,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-17-H';
+const BUILD_VERSION = 'v2026-03-17-J';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -2216,20 +2215,19 @@ const STATE_VERSION = 2;
 let _currentUserId = null;
 let _currentToken = null;   // Auth-Token direkt aus onAuthStateChange
 let _saveDebounceTimer = null;
+let _lastLocalMutationTs = 0;
+let _lastCloudWriteTs = 0;
+let _lastDbLoadTs = 0;
 
-function saveLocal() {
+function saveLocal(markDirty = true) {
   try {
-    const payload = JSON.stringify({ _v: STATE_VERSION, ...state });
+    if (markDirty) _lastLocalMutationTs = Date.now();
+    const payload = JSON.stringify({ _v: STATE_VERSION, _build: BUILD_VERSION, ...state });
     localStorage.setItem('zgspiele', payload);
     localStorage.setItem('zgspiele_backup', payload);
     try { sessionStorage.setItem('zgspiele_session', payload); } catch(_) {}
-    dbg('Local Save: OK (' + payload.length + ' bytes)', 'ok');
     return true;
-  } catch(e) {
-    console.warn('Spielr: local save failed', e);
-    dbg('Local Save Fehler: ' + (e?.message || e), 'err');
-    return false;
-  }
+  } catch(e) { console.warn('Spielr: local save failed', e); return false; }
 }
 
 function loadLocal() {
@@ -2263,7 +2261,7 @@ function applyParsed(parsed) {
       return l;
     });
   }
-  const { _v, pendingResult, currentListId, currentHistoryId, activeTournamentId, currentTab, ...safe } = parsed;
+  const { _v, _build, pendingResult, currentListId, currentHistoryId, activeTournamentId, currentTab, ...safe } = parsed;
   state = { ...state, ...safe };
   return true;
 }
@@ -2290,77 +2288,27 @@ function _getToken() {
   return _currentToken;
 }
 
-function getSaveDebugContext() {
-  let localOk = true;
-  try {
-    const k = '__spielr_save_test__';
-    localStorage.setItem(k, '1');
-    localStorage.removeItem(k);
-  } catch(e) {
-    localOk = false;
-  }
-  const list = getCurrentList();
-  const shared = !!(list?._sharedGroupId || (_sharedGroups && _sharedGroups.find(g => g.id === list?.id)));
-  return {
-    hasSupabaseClient: !!_sb,
-    hasUserId: !!_currentUserId,
-    hasToken: !!_currentToken,
-    online: navigator.onLine,
-    localStorageWritable: localOk,
-    currentListId: state.currentListId || null,
-    sharedGroup: shared,
-    sharedGroupId: list?._sharedGroupId || (shared && list?.id) || null,
-    supabaseUrlConfigured: !!(SUPABASE_URL && !SUPABASE_URL.startsWith('%%')),
-  };
-}
-
-function debugSaveReason(prefix) {
-  const ctx = getSaveDebugContext();
-  const reasons = [];
-  if (!ctx.localStorageWritable) reasons.push('localStorage nicht beschreibbar');
-  if (!ctx.supabaseUrlConfigured) reasons.push('Supabase URL/Key Platzhalter nicht ersetzt');
-  if (!ctx.hasSupabaseClient) reasons.push('kein Supabase-Client');
-  if (!ctx.hasUserId) reasons.push('kein eingeloggter User');
-  if (!ctx.hasToken) reasons.push('kein Auth-Token');
-  if (!ctx.online) reasons.push('offline');
-  const msg = prefix + ' | local=' + (ctx.localStorageWritable ? 'ok' : 'fail')
-    + ' | sb=' + (ctx.hasSupabaseClient ? 'ok' : 'nein')
-    + ' | user=' + (ctx.hasUserId ? 'ok' : 'nein')
-    + ' | token=' + (ctx.hasToken ? 'ok' : 'nein')
-    + ' | online=' + (ctx.online ? 'ja' : 'nein')
-    + ' | list=' + (ctx.currentListId || '—')
-    + (ctx.sharedGroup ? ' | shared=' + ctx.sharedGroupId : '')
-    + (reasons.length ? ' | Grund: ' + reasons.join(', ') : '');
-  dbg(msg, reasons.length ? 'warn' : 'info');
-  return ctx;
-}
-
 async function saveToSupabase() {
-  if (!_sb || !_currentUserId) {
-    debugSaveReason('DB Save übersprungen');
-    return;
-  }
+  if (!_sb || !_currentUserId) return;
   setSyncStatus('saving');
   try {
     const token = _getToken();
-    if (!token) { dbg('DB Save: kein Token → lokale Daten bleiben', 'warn'); debugSaveReason('DB Save ohne Token'); setSyncStatus('error'); return; }
-    const payload = { _v: STATE_VERSION, ...state };
-    dbg('DB Save: upsert via REST… rows=user_data bytes=' + JSON.stringify(payload).length, 'info');
+    if (!token) { dbg('DB Save: kein Token → lokale Daten bleiben', 'warn'); setSyncStatus('error'); return; }
+    dbg('DB Save: upsert via REST…', 'info');
     await _sbRestFetch('POST', 'user_data', {
       user_id: _currentUserId,
-      data: payload,
+      data: { _v: STATE_VERSION, ...state },
       updated_at: new Date().toISOString()
     }, token);
     dbg('DB Save: OK ✅', 'ok');
     setSyncStatus('saved');
   } catch(e) {
     dbg('DB Save Fehler: ' + e.message, 'err');
-    debugSaveReason('DB Save Fehler Kontext');
     setSyncStatus('error');
   }
 }
 
-async function loadFromSupabase(userId) {
+async function loadFromSupabase(userId, opts = {}) {
   if (!_sb) { dbg('DB: kein Client', 'err'); return false; }
   dbg('DB Load: REST fetch für ' + userId.substring(0,8) + '…', 'info');
   try {
@@ -2369,15 +2317,28 @@ async function loadFromSupabase(userId) {
     dbg('DB Load: Token OK, sende Query…', 'info');
     const rows = await _sbRestFetch(
       'GET',
-      'user_data?select=data&user_id=eq.' + encodeURIComponent(userId) + '&limit=1',
+      'user_data?select=data,updated_at&user_id=eq.' + encodeURIComponent(userId) + '&limit=1',
       null,
       token
     );
     dbg('DB Load: ' + (rows ? rows.length + ' rows' : 'null'), 'ok');
     if (!rows || rows.length === 0) { dbg('DB: Kein Row → lokale Daten', 'warn'); return false; }
-    const bytes = JSON.stringify(rows[0].data).length;
+    const row = rows[0] || {};
+    const bytes = JSON.stringify(row.data).length;
+    const dbTs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+    const pendingSave = !!_saveDebounceTimer;
+    const localDirty = _lastLocalMutationTs > (_lastCloudWriteTs + 1000);
+    if (!opts.force && (pendingSave || localDirty)) {
+      dbg('DB Load übersprungen: lokale Änderungen sind neuer | pendingSave=' + (pendingSave ? 'ja' : 'nein')
+        + ' | localTs=' + (_lastLocalMutationTs || 0)
+        + ' | cloudTs=' + (_lastCloudWriteTs || 0)
+        + ' | dbTs=' + (dbTs || 0), 'warn');
+      return false;
+    }
     dbg('DB: ' + bytes + ' bytes geladen ✅', 'ok');
-    return applyParsed(rows[0].data);
+    const ok = applyParsed(row.data);
+    if (ok) _lastDbLoadTs = Date.now();
+    return ok;
   } catch(e) {
     dbg('DB Load Fehler: ' + e.message, 'err');
     return false;
@@ -2387,65 +2348,20 @@ async function loadFromSupabase(userId) {
 // save() – sofort lokal, nach 1.5s in Cloud
 function save() {
   window._lastActionTime = Date.now();
-  const localOk = saveLocal();
-  const ctx = debugSaveReason('save() aufgerufen');
+  saveLocal();
   const list = getCurrentList();
   // Geteilte Gruppe? → shared_groups updaten (nur Admins)
   const isShared = list?._sharedGroupId || (_sharedGroups && _sharedGroups.find(g => g.id === list?.id));
   const sharedId = list?._sharedGroupId || (isShared && list?.id);
   if (sharedId && _currentToken) {
-    dbg('save(): geteilte Gruppe erkannt → saveSharedGroup in 1500ms (' + sharedId + ')', 'info');
-    if (_saveDebounceTimer) {
-      clearTimeout(_saveDebounceTimer);
-      dbg('save(): bestehender Shared-Save Timer ersetzt (' + sharedId + ')', 'info');
-    }
-    _saveDebounceTimer = setTimeout(async () => {
-      _saveDebounceTimer = null;
-      dbg('save(): Shared-Save Timer ausgelöst (' + sharedId + ')', 'info');
-      try {
-        await saveSharedGroup(sharedId);
-      } catch (e) {
-        dbg('save(): Shared-Save Timer Fehler: ' + (e?.message || e), 'err');
-      }
-    }, 1500);
+    if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+    _saveDebounceTimer = setTimeout(() => saveSharedGroup(sharedId), 1500);
     return;
   }
-  if (!_sb || !_currentUserId) {
-    dbg('save(): Cloud-Save übersprungen → ' + (!localOk ? 'lokal auch fehlgeschlagen' : 'nur lokal gespeichert'), localOk ? 'warn' : 'err');
-    return;
-  }
-  if (!ctx.hasToken) {
-    dbg('save(): Cloud-Save verschoben/übersprungen, weil kein Token vorhanden ist', 'warn');
-    setSyncStatus('error');
-    return;
-  }
+  if (!_sb || !_currentUserId) return;
   if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
   setSyncStatus('saving');
-  dbg('save(): Cloud-Save in 1500ms geplant', 'info');
   _saveDebounceTimer = setTimeout(() => saveToSupabase(), 1500);
-}
-
-async function flushSave() {
-  saveLocal();
-  debugSaveReason('flushSave()');
-  const list = getCurrentList();
-  const sharedId = list?._sharedGroupId || ((_sharedGroups && _sharedGroups.find(g => g.id === list?.id)) ? list?.id : null);
-  if (sharedId && _currentToken) {
-    if (_saveDebounceTimer) {
-      clearTimeout(_saveDebounceTimer);
-      _saveDebounceTimer = null;
-      dbg('flushSave(): pending Shared-Save Timer sofort ausgeführt (' + sharedId + ')', 'info');
-    }
-    try { await saveSharedGroup(sharedId); } catch(e) { dbg('Shared Flush Fehler: ' + e.message, 'err'); }
-    return;
-  }
-  if (_saveDebounceTimer) {
-    clearTimeout(_saveDebounceTimer);
-    _saveDebounceTimer = null;
-  }
-  if (_sb && _currentUserId && _currentToken) {
-    try { await saveToSupabase(); } catch(e) { dbg('Flush Save Fehler: ' + e.message, 'err'); }
-  }
 }
 
 // ╔══════════════════════════════════════════════════════╗
@@ -3045,13 +2961,8 @@ async function initApp() {
   });
 
   // ── 2. Offline/online ──
-  window.addEventListener('online',  () => { if (_currentUserId) { dbg('online: Verbindung wieder da → flushSave()', 'info'); setSyncStatus('saving'); flushSave(); } });
-  window.addEventListener('offline', () => { saveLocal(); setSyncStatus('offline'); });
-  window.addEventListener('pagehide', () => { flushSave(); });
-  window.addEventListener('beforeunload', () => { saveLocal(); });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushSave();
-  });
+  window.addEventListener('online',  () => { if (_currentUserId) { setSyncStatus('saving'); saveToSupabase(); } });
+  window.addEventListener('offline', () => setSyncStatus('offline'));
 
   // ── 3. No Supabase → pure localStorage mode ──
   if (!_sb) {
@@ -3133,7 +3044,7 @@ async function initApp() {
         // App läuft bereits (Sofortstart) → Token + DB-Sync + Einladungen aktualisieren
         dbg('→ Supabase bestätigt Session, lade DB-Daten…', 'info');
         const loaded = await loadFromSupabase(session.user.id);
-        if (loaded) { saveLocal(); renderLists(); dbg('✅ DB-Sync nach Sofortstart OK', 'ok'); }
+        if (loaded) { saveLocal(false); renderLists(); dbg('✅ DB-Sync nach Sofortstart OK', 'ok'); }
         else dbg('→ DB-Sync: lokale Daten bleiben', 'warn');
         // Geteilte Gruppen + Einladungen frisch laden (frischer Token!)
         dbg('SIGNED_IN: lade Einladungen mit frischem Token…', 'info');
@@ -3863,40 +3774,100 @@ async function saveSharedGroup(groupId) {
       dbg('Shared group save übersprungen | Grund: kein Auth-Token (' + groupId + ')', 'err');
       return;
     }
-    let sg = _sharedGroups.find(g => g.id === groupId);
+    let effectiveGroupId = list._sharedGroupId || groupId;
+    let sg = _sharedGroups.find(g => g.id === effectiveGroupId);
+
     if (!sg) {
-      dbg('Shared group nicht im lokalen Cache → lade Gruppe direkt aus Supabase (' + groupId + ')', 'warn');
+      dbg('Shared group nicht im lokalen Cache → lade Gruppe direkt aus Supabase (' + effectiveGroupId + ')', 'warn');
       const members = await _shRest('GET', 'group_members',
-        'group_id=eq.' + encodeURIComponent(groupId) + '&user_id=eq.' + encodeURIComponent(_currentUserId) + '&select=group_id,role',
+        'group_id=eq.' + encodeURIComponent(effectiveGroupId) + '&user_id=eq.' + encodeURIComponent(_currentUserId) + '&select=group_id,role',
         null);
       const groups = await _shRest('GET', 'shared_groups',
-        'id=eq.' + encodeURIComponent(groupId) + '&select=id,name,data,updated_at,updated_by',
+        'id=eq.' + encodeURIComponent(effectiveGroupId) + '&select=id,name,data,updated_at,updated_by',
         null);
       const member = Array.isArray(members) ? members[0] : null;
       const group  = Array.isArray(groups) ? groups[0] : null;
       if (group && member) {
         sg = { ...group, role: member.role || 'reader', _hasNew: group.updated_by && group.updated_by !== _currentUserId };
         _sharedGroups.push(sg);
-        dbg('Shared group Cache-Miss behoben: Gruppe direkt geladen | Rolle=' + sg.role + ' (' + groupId + ')', 'ok');
-      } else {
-        dbg('Shared group save übersprungen | Grund: shared_group weder im Cache noch per DB ladbar (' + groupId + ')', 'err');
-        return;
+        dbg('Shared group Cache-Miss behoben: Gruppe direkt geladen | Rolle=' + sg.role + ' (' + effectiveGroupId + ')', 'ok');
       }
     }
-    if (sg.role !== 'admin') {
-      dbg('Shared group save übersprungen | Grund: Rolle=' + sg.role + ' statt admin (' + groupId + ')', 'warn');
-      return; // nur Admins dürfen speichern
+
+    if (!sg) {
+      dbg('Auto-Heilung gestartet für defekte shared_group-Verknüpfung (' + effectiveGroupId + ')', 'warn');
+      // 1) Bestehende Gruppe gleichen Namens suchen, in der ich Admin bin
+      const adminMemberships = await _shRest('GET', 'group_members',
+        'user_id=eq.' + encodeURIComponent(_currentUserId) + '&role=eq.admin&select=group_id',
+        null) || [];
+      const candidateIds = adminMemberships.map(m => m.group_id).filter(Boolean);
+      let match = null;
+      if (candidateIds.length) {
+        const inClause = candidateIds.map(id => '"' + id + '"').join(',');
+        const groupsByName = await _shRest('GET', 'shared_groups',
+          'id=in.(' + inClause + ')&name=eq.' + encodeURIComponent(list.name) + '&select=id,name,data,updated_at,updated_by',
+          null) || [];
+        match = groupsByName[0] || null;
+      }
+      if (match) {
+        list._sharedGroupId = match.id;
+        sg = { ...match, role: 'admin', _hasNew: match.updated_by && match.updated_by !== _currentUserId };
+        _sharedGroups = _sharedGroups.filter(g => g.id !== match.id);
+        _sharedGroups.push(sg);
+        saveLocal();
+        dbg('Auto-Heilung: bestehende shared_group über Namen wiederverknüpft (' + match.id + ')', 'ok');
+      } else {
+        // 2) Falls nichts passt: neue shared_group erzeugen und verknüpfen
+        const newId = (typeof uuidv4 === 'function') ? uuidv4() : crypto.randomUUID();
+        const initialData = { _v: 5, _build: BUILD_VERSION, persons: list.persons, history: list.history, tournaments: list.tournaments };
+        const created = await _shRest('POST', 'shared_groups', null, {
+          id: newId,
+          name: list.name,
+          created_by: _currentUserId,
+          data: initialData,
+          updated_at: new Date().toISOString(),
+          updated_by: _currentUserId
+        });
+        if (created !== null) {
+          await _shRest('POST', 'group_members', null, {
+            group_id: newId,
+            user_id: _currentUserId,
+            email: _currentUserEmail,
+            role: 'admin'
+          });
+          list._sharedGroupId = newId;
+          sg = { id: newId, name: list.name, role: 'admin', data: initialData, _hasNew: false };
+          _sharedGroups.push(sg);
+          saveLocal();
+          dbg('Auto-Heilung: neue shared_group erstellt und verknüpft (' + newId + ')', 'ok');
+        }
+      }
+      effectiveGroupId = list._sharedGroupId || effectiveGroupId;
     }
-    const data = { _v: 3, _build: BUILD_VERSION, persons: list.persons, history: list.history, tournaments: list.tournaments };
-    const res = await _shRest('PATCH', 'shared_groups',
-      'id=eq.' + encodeURIComponent(groupId),
-      { data, updated_at: new Date().toISOString(), updated_by: _currentUserId });
-    if (!res) {
-      dbg('Shared group save fehlgeschlagen | Grund: PATCH lieferte leere Antwort (' + groupId + ')', 'err');
+
+    if (!sg) {
+      dbg('Shared group save übersprungen | Grund: shared_group weder im Cache noch per Auto-Heilung nutzbar (' + (list._sharedGroupId || groupId) + ')', 'err');
       return;
     }
-    _shLogActivity(groupId, 'bearbeitet', 'Daten aktualisiert');
-    dbg('Shared group saved: ' + groupId + ' | list=' + (list.id || '—') + ' | bytes=' + JSON.stringify(data).length, 'ok');
+    if (sg.role !== 'admin') {
+      dbg('Shared group save übersprungen | Grund: Rolle=' + sg.role + ' statt admin (' + effectiveGroupId + ')', 'warn');
+      return;
+    }
+
+    const data = { _v: 5, _build: BUILD_VERSION, persons: list.persons, history: list.history, tournaments: list.tournaments };
+    const res = await _shRest('PATCH', 'shared_groups',
+      'id=eq.' + encodeURIComponent(effectiveGroupId),
+      { data, updated_at: new Date().toISOString(), updated_by: _currentUserId });
+    if (res === undefined) {
+      dbg('Shared group save fehlgeschlagen | Grund: PATCH lieferte undefined (' + effectiveGroupId + ')', 'err');
+      return;
+    }
+    _lastCloudWriteTs = Date.now();
+    list._sharedGroupId = effectiveGroupId;
+    const idx = _sharedGroups.findIndex(g => g.id === effectiveGroupId);
+    if (idx >= 0) _sharedGroups[idx] = { ..._sharedGroups[idx], data, updated_by: _currentUserId, _hasNew: false };
+    _shLogActivity(effectiveGroupId, 'bearbeitet', 'Daten aktualisiert');
+    dbg('Shared group saved: ' + effectiveGroupId + ' | list=' + (list.id || '—') + ' | bytes=' + JSON.stringify(data).length, 'ok');
   } catch (e) {
     dbg('Shared group save Fehler: ' + (e?.message || e), 'err');
   }
