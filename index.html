@@ -73,10 +73,10 @@
   .header .back-btn:hover { background: var(--surface2); }
 
   /* Screens */
-  .screen { display: none; flex-direction: column; min-height: 0; }
-  .screen.active { display: flex !important; height: 100%; min-height: 100vh; }
+  .screen { display: none; flex-direction: column; }
+  .screen.active { display: flex !important; }
   .screen:not(.active) { display: none !important; }
-  .screen-body { padding: 20px; flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .screen-body { padding: 20px; flex: 1; }
 
   /* Empty State */
   .empty-state {
@@ -1447,7 +1447,7 @@
 </div>
 
 <!-- ===================== SCREEN: LIST DETAIL ===================== -->
-<div class="screen" id="screen-list-detail" style="height:100%;min-height:100vh">
+<div class="screen" id="screen-list-detail">
   <div class="header">
     <button class="back-btn" onclick="goBack('screen-lists')" aria-label="Zurück">‹</button>
     <h1 id="list-detail-title">Gruppe</h1>
@@ -1602,7 +1602,7 @@
   </div>
 
   <!-- Tournament Tab -->
-  <div id="tab-content-tournament" class="screen-body" style="display:none;padding:0;min-height:0">
+  <div id="tab-content-tournament" style="display:none">
     <!-- Tournament List View -->
     <div id="tournament-list-view">
       <div style="padding:16px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
@@ -2218,20 +2218,32 @@ let _saveDebounceTimer = null;
 
 function saveLocal() {
   try {
-    localStorage.setItem('zgspiele', JSON.stringify({ _v: STATE_VERSION, ...state }));
+    const payload = JSON.stringify({ _v: STATE_VERSION, ...state });
+    localStorage.setItem('zgspiele', payload);
+    localStorage.setItem('zgspiele_backup', payload);
+    try { sessionStorage.setItem('zgspiele_session', payload); } catch(_) {}
   } catch(e) { console.warn('Spielr: local save failed', e); }
 }
 
 function loadLocal() {
-  try {
-    const raw = localStorage.getItem('zgspiele');
-    if (!raw) return false;
-    return applyParsed(JSON.parse(raw));
-  } catch(e) {
-    console.warn('Spielr: local load failed', e);
-    localStorage.removeItem('zgspiele');
-    return false;
+  const keys = [
+    ['localStorage', 'zgspiele'],
+    ['localStorage', 'zgspiele_backup'],
+    ['sessionStorage', 'zgspiele_session']
+  ];
+  for (const [storeName, key] of keys) {
+    try {
+      const store = window[storeName];
+      const raw = store?.getItem(key);
+      if (!raw) continue;
+      const ok = applyParsed(JSON.parse(raw));
+      if (ok) return true;
+    } catch(e) {
+      console.warn('Spielr: local load failed from ' + key, e);
+      try { window[storeName]?.removeItem(key); } catch(_) {}
+    }
   }
+  return false;
 }
 
 function applyParsed(parsed) {
@@ -2332,6 +2344,23 @@ function save() {
   if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
   setSyncStatus('saving');
   _saveDebounceTimer = setTimeout(() => saveToSupabase(), 1500);
+}
+
+async function flushSave() {
+  saveLocal();
+  const list = getCurrentList();
+  const sharedId = list?._sharedGroupId || ((_sharedGroups && _sharedGroups.find(g => g.id === list?.id)) ? list?.id : null);
+  if (sharedId && _currentToken) {
+    try { await saveSharedGroup(sharedId); } catch(e) { dbg('Shared Flush Fehler: ' + e.message, 'err'); }
+    return;
+  }
+  if (_saveDebounceTimer) {
+    clearTimeout(_saveDebounceTimer);
+    _saveDebounceTimer = null;
+  }
+  if (_sb && _currentUserId && _currentToken) {
+    try { await saveToSupabase(); } catch(e) { dbg('Flush Save Fehler: ' + e.message, 'err'); }
+  }
 }
 
 // ╔══════════════════════════════════════════════════════╗
@@ -2932,7 +2961,12 @@ async function initApp() {
 
   // ── 2. Offline/online ──
   window.addEventListener('online',  () => { if (_currentUserId) { setSyncStatus('saving'); saveToSupabase(); } });
-  window.addEventListener('offline', () => setSyncStatus('offline'));
+  window.addEventListener('offline', () => { saveLocal(); setSyncStatus('offline'); });
+  window.addEventListener('pagehide', () => { flushSave(); });
+  window.addEventListener('beforeunload', () => { saveLocal(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSave();
+  });
 
   // ── 3. No Supabase → pure localStorage mode ──
   if (!_sb) {
