@@ -3837,16 +3837,38 @@ async function openSharedGroup(groupId) {
 
 // ── Geteilte Gruppe speichern (sync zur DB) ──
 async function saveSharedGroup(groupId) {
-  const list = state.lists.find(l => l.id === groupId);
-  if (!list || !_currentToken) return;
-  const sg = _sharedGroups.find(g => g.id === groupId);
-  if (!sg || sg.role !== 'admin') return; // nur Admins dürfen speichern
-  const data = { _v: 2, persons: list.persons, history: list.history, tournaments: list.tournaments };
-  await _shRest('PATCH', 'shared_groups',
-    'id=eq.' + encodeURIComponent(groupId),
-    { data, updated_at: new Date().toISOString(), updated_by: _currentUserId });
-  _shLogActivity(groupId, 'bearbeitet', 'Daten aktualisiert');
-  dbg('Shared group saved: ' + groupId, 'ok');
+  try {
+    const list = state.lists.find(l => l.id === groupId || l._sharedGroupId === groupId);
+    if (!list) {
+      dbg('Shared group save übersprungen | Grund: Liste zu groupId nicht gefunden (' + groupId + ')', 'err');
+      return;
+    }
+    if (!_currentToken) {
+      dbg('Shared group save übersprungen | Grund: kein Auth-Token (' + groupId + ')', 'err');
+      return;
+    }
+    const sg = _sharedGroups.find(g => g.id === groupId);
+    if (!sg) {
+      dbg('Shared group save übersprungen | Grund: shared_group nicht im lokalen Cache (' + groupId + ')', 'err');
+      return;
+    }
+    if (sg.role !== 'admin') {
+      dbg('Shared group save übersprungen | Grund: Rolle=' + sg.role + ' statt admin (' + groupId + ')', 'warn');
+      return; // nur Admins dürfen speichern
+    }
+    const data = { _v: 2, persons: list.persons, history: list.history, tournaments: list.tournaments };
+    const res = await _shRest('PATCH', 'shared_groups',
+      'id=eq.' + encodeURIComponent(groupId),
+      { data, updated_at: new Date().toISOString(), updated_by: _currentUserId });
+    if (!res) {
+      dbg('Shared group save fehlgeschlagen | Grund: PATCH lieferte leere Antwort (' + groupId + ')', 'err');
+      return;
+    }
+    _shLogActivity(groupId, 'bearbeitet', 'Daten aktualisiert');
+    dbg('Shared group saved: ' + groupId + ' | list=' + (list.id || '—') + ' | bytes=' + JSON.stringify(data).length, 'ok');
+  } catch (e) {
+    dbg('Shared group save Fehler: ' + (e?.message || e), 'err');
+  }
 }
 
 // ── Geteilte Gruppe löschen (alle Admins müssen zustimmen) ──
