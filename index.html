@@ -73,10 +73,10 @@
   .header .back-btn:hover { background: var(--surface2); }
 
   /* Screens */
-  .screen { display: none; flex-direction: column; }
-  .screen.active { display: flex !important; }
+  .screen { display: none; flex-direction: column; min-height: 0; }
+  .screen.active { display: flex !important; height: 100%; min-height: 100vh; }
   .screen:not(.active) { display: none !important; }
-  .screen-body { padding: 20px; flex: 1; }
+  .screen-body { padding: 20px; flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
   /* Empty State */
   .empty-state {
@@ -1447,7 +1447,7 @@
 </div>
 
 <!-- ===================== SCREEN: LIST DETAIL ===================== -->
-<div class="screen" id="screen-list-detail">
+<div class="screen" id="screen-list-detail" style="height:100%;min-height:100vh">
   <div class="header">
     <button class="back-btn" onclick="goBack('screen-lists')" aria-label="Zurück">‹</button>
     <h1 id="list-detail-title">Gruppe</h1>
@@ -1602,7 +1602,7 @@
   </div>
 
   <!-- Tournament Tab -->
-  <div id="tab-content-tournament" style="display:none">
+  <div id="tab-content-tournament" class="screen-body" style="display:none;padding:0;min-height:0">
     <!-- Tournament List View -->
     <div id="tournament-list-view">
       <div style="padding:16px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
