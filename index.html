@@ -2099,10 +2099,11 @@
     if (toggle) toggle.style.display = 'flex';
     toggle && toggle.addEventListener('click', debugToggle);
 
-    dbg('=== SPIELR AUTH DEBUG ===', 'info');
+    dbg('=== SPIELR DEBUG ===', 'info');
     dbg('Umgebung: ' + env, 'info');
     dbg('URL: ' + window.location.href, 'info');
     dbg('UserAgent: ' + ua.substring(0, 80), 'info');
+    debugSaveReason('Initialer Save-Status');
 
     // Hash/Query-Parameter prüfen (OAuth Callback Tokens)
     const hash = window.location.hash;
@@ -2222,7 +2223,13 @@ function saveLocal() {
     localStorage.setItem('zgspiele', payload);
     localStorage.setItem('zgspiele_backup', payload);
     try { sessionStorage.setItem('zgspiele_session', payload); } catch(_) {}
-  } catch(e) { console.warn('Spielr: local save failed', e); }
+    dbg('Local Save: OK (' + payload.length + ' bytes)', 'ok');
+    return true;
+  } catch(e) {
+    console.warn('Spielr: local save failed', e);
+    dbg('Local Save Fehler: ' + (e?.message || e), 'err');
+    return false;
+  }
 }
 
 function loadLocal() {
@@ -2283,22 +2290,72 @@ function _getToken() {
   return _currentToken;
 }
 
+function getSaveDebugContext() {
+  let localOk = true;
+  try {
+    const k = '__spielr_save_test__';
+    localStorage.setItem(k, '1');
+    localStorage.removeItem(k);
+  } catch(e) {
+    localOk = false;
+  }
+  const list = getCurrentList();
+  const shared = !!(list?._sharedGroupId || (_sharedGroups && _sharedGroups.find(g => g.id === list?.id)));
+  return {
+    hasSupabaseClient: !!_sb,
+    hasUserId: !!_currentUserId,
+    hasToken: !!_currentToken,
+    online: navigator.onLine,
+    localStorageWritable: localOk,
+    currentListId: state.currentListId || null,
+    sharedGroup: shared,
+    sharedGroupId: list?._sharedGroupId || (shared && list?.id) || null,
+    supabaseUrlConfigured: !!(SUPABASE_URL && !SUPABASE_URL.startsWith('%%')),
+  };
+}
+
+function debugSaveReason(prefix) {
+  const ctx = getSaveDebugContext();
+  const reasons = [];
+  if (!ctx.localStorageWritable) reasons.push('localStorage nicht beschreibbar');
+  if (!ctx.supabaseUrlConfigured) reasons.push('Supabase URL/Key Platzhalter nicht ersetzt');
+  if (!ctx.hasSupabaseClient) reasons.push('kein Supabase-Client');
+  if (!ctx.hasUserId) reasons.push('kein eingeloggter User');
+  if (!ctx.hasToken) reasons.push('kein Auth-Token');
+  if (!ctx.online) reasons.push('offline');
+  const msg = prefix + ' | local=' + (ctx.localStorageWritable ? 'ok' : 'fail')
+    + ' | sb=' + (ctx.hasSupabaseClient ? 'ok' : 'nein')
+    + ' | user=' + (ctx.hasUserId ? 'ok' : 'nein')
+    + ' | token=' + (ctx.hasToken ? 'ok' : 'nein')
+    + ' | online=' + (ctx.online ? 'ja' : 'nein')
+    + ' | list=' + (ctx.currentListId || '—')
+    + (ctx.sharedGroup ? ' | shared=' + ctx.sharedGroupId : '')
+    + (reasons.length ? ' | Grund: ' + reasons.join(', ') : '');
+  dbg(msg, reasons.length ? 'warn' : 'info');
+  return ctx;
+}
+
 async function saveToSupabase() {
-  if (!_sb || !_currentUserId) return;
+  if (!_sb || !_currentUserId) {
+    debugSaveReason('DB Save übersprungen');
+    return;
+  }
   setSyncStatus('saving');
   try {
     const token = _getToken();
-    if (!token) { dbg('DB Save: kein Token → lokale Daten bleiben', 'warn'); setSyncStatus('error'); return; }
-    dbg('DB Save: upsert via REST…', 'info');
+    if (!token) { dbg('DB Save: kein Token → lokale Daten bleiben', 'warn'); debugSaveReason('DB Save ohne Token'); setSyncStatus('error'); return; }
+    const payload = { _v: STATE_VERSION, ...state };
+    dbg('DB Save: upsert via REST… rows=user_data bytes=' + JSON.stringify(payload).length, 'info');
     await _sbRestFetch('POST', 'user_data', {
       user_id: _currentUserId,
-      data: { _v: STATE_VERSION, ...state },
+      data: payload,
       updated_at: new Date().toISOString()
     }, token);
     dbg('DB Save: OK ✅', 'ok');
     setSyncStatus('saved');
   } catch(e) {
     dbg('DB Save Fehler: ' + e.message, 'err');
+    debugSaveReason('DB Save Fehler Kontext');
     setSyncStatus('error');
   }
 }
@@ -2330,24 +2387,36 @@ async function loadFromSupabase(userId) {
 // save() – sofort lokal, nach 1.5s in Cloud
 function save() {
   window._lastActionTime = Date.now();
-  saveLocal();
+  const localOk = saveLocal();
+  const ctx = debugSaveReason('save() aufgerufen');
   const list = getCurrentList();
   // Geteilte Gruppe? → shared_groups updaten (nur Admins)
   const isShared = list?._sharedGroupId || (_sharedGroups && _sharedGroups.find(g => g.id === list?.id));
   const sharedId = list?._sharedGroupId || (isShared && list?.id);
   if (sharedId && _currentToken) {
+    dbg('save(): geteilte Gruppe erkannt → saveSharedGroup in 1500ms (' + sharedId + ')', 'info');
     if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
     _saveDebounceTimer = setTimeout(() => saveSharedGroup(sharedId), 1500);
     return;
   }
-  if (!_sb || !_currentUserId) return;
+  if (!_sb || !_currentUserId) {
+    dbg('save(): Cloud-Save übersprungen → ' + (!localOk ? 'lokal auch fehlgeschlagen' : 'nur lokal gespeichert'), localOk ? 'warn' : 'err');
+    return;
+  }
+  if (!ctx.hasToken) {
+    dbg('save(): Cloud-Save verschoben/übersprungen, weil kein Token vorhanden ist', 'warn');
+    setSyncStatus('error');
+    return;
+  }
   if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
   setSyncStatus('saving');
+  dbg('save(): Cloud-Save in 1500ms geplant', 'info');
   _saveDebounceTimer = setTimeout(() => saveToSupabase(), 1500);
 }
 
 async function flushSave() {
   saveLocal();
+  debugSaveReason('flushSave()');
   const list = getCurrentList();
   const sharedId = list?._sharedGroupId || ((_sharedGroups && _sharedGroups.find(g => g.id === list?.id)) ? list?.id : null);
   if (sharedId && _currentToken) {
