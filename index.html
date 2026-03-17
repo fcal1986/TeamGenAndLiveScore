@@ -2176,7 +2176,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-17-G';
+const BUILD_VERSION = 'v2026-03-17-H';
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
 
@@ -3863,10 +3863,25 @@ async function saveSharedGroup(groupId) {
       dbg('Shared group save übersprungen | Grund: kein Auth-Token (' + groupId + ')', 'err');
       return;
     }
-    const sg = _sharedGroups.find(g => g.id === groupId);
+    let sg = _sharedGroups.find(g => g.id === groupId);
     if (!sg) {
-      dbg('Shared group save übersprungen | Grund: shared_group nicht im lokalen Cache (' + groupId + ')', 'err');
-      return;
+      dbg('Shared group nicht im lokalen Cache → lade Gruppe direkt aus Supabase (' + groupId + ')', 'warn');
+      const members = await _shRest('GET', 'group_members',
+        'group_id=eq.' + encodeURIComponent(groupId) + '&user_id=eq.' + encodeURIComponent(_currentUserId) + '&select=group_id,role',
+        null);
+      const groups = await _shRest('GET', 'shared_groups',
+        'id=eq.' + encodeURIComponent(groupId) + '&select=id,name,data,updated_at,updated_by',
+        null);
+      const member = Array.isArray(members) ? members[0] : null;
+      const group  = Array.isArray(groups) ? groups[0] : null;
+      if (group && member) {
+        sg = { ...group, role: member.role || 'reader', _hasNew: group.updated_by && group.updated_by !== _currentUserId };
+        _sharedGroups.push(sg);
+        dbg('Shared group Cache-Miss behoben: Gruppe direkt geladen | Rolle=' + sg.role + ' (' + groupId + ')', 'ok');
+      } else {
+        dbg('Shared group save übersprungen | Grund: shared_group weder im Cache noch per DB ladbar (' + groupId + ')', 'err');
+        return;
+      }
     }
     if (sg.role !== 'admin') {
       dbg('Shared group save übersprungen | Grund: Rolle=' + sg.role + ' statt admin (' + groupId + ')', 'warn');
