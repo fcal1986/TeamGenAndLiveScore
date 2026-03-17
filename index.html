@@ -76,7 +76,7 @@
   .screen { display: none; flex-direction: column; }
   .screen.active { display: flex !important; }
   .screen:not(.active) { display: none !important; }
-  .screen-body { padding: 20px; flex: 1; }
+  .screen-body { padding: 20px; flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
   /* Empty State */
   .empty-state {
@@ -512,6 +512,22 @@
   @media (max-width: 480px) {
     .fab { right: 20px; }
   }
+
+
+  #screen-list-detail { min-height: 100vh; height: 100vh; }
+  #screen-list-detail.active { display:flex !important; }
+  #tab-content-tournament {
+    display:none;
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    padding:0 20px 20px;
+  }
+  #tournament-list-view, #tournament-detail-view {
+    min-height:0;
+  }
+  #tournament-detail-view { padding-bottom: 28px; }
 
   .badge {
     display: inline-flex; align-items: center; justify-content: center;
@@ -1602,7 +1618,7 @@
   </div>
 
   <!-- Tournament Tab -->
-  <div id="tab-content-tournament" style="display:none">
+  <div id="tab-content-tournament" class="screen-body" style="display:none">
     <!-- Tournament List View -->
     <div id="tournament-list-view">
       <div style="padding:16px 20px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
@@ -2175,7 +2191,7 @@
 // ║  SUPABASE CONFIG                                      ║
 // ║  Werte werden von GitHub Actions eingesetzt           ║
 // ╚══════════════════════════════════════════════════════╝
-const BUILD_VERSION = 'v2026-03-17-K';
+const BUILD_VERSION = 'v2026-03-17-L';
 const SHARED_ENABLED = false;
 const SUPABASE_URL  = '%%SUPABASE_URL%%';
 const SUPABASE_ANON = '%%SUPABASE_ANON_KEY%%';
@@ -2222,7 +2238,7 @@ function stripSharedState() {
 function getList(id) { return state.lists.find(l => l.id === id); }
 function getCurrentList() { return getList(state.currentListId); }
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 
 // ╔══════════════════════════════════════════════════════╗
 // ║  PERSIST  (localStorage + Supabase)                  ║
@@ -2237,7 +2253,7 @@ let _lastDbLoadTs = 0;
 function saveLocal(markDirty = true) {
   try {
     if (markDirty) _lastLocalMutationTs = Date.now();
-    const payload = JSON.stringify({ _v: STATE_VERSION, _build: BUILD_VERSION, ...state });
+    const payload = JSON.stringify({ _v: STATE_VERSION, _build: BUILD_VERSION, _savedAt: _lastLocalMutationTs || Date.now(), ...state });
     localStorage.setItem('zgspiele', payload);
     localStorage.setItem('zgspiele_backup', payload);
     try { sessionStorage.setItem('zgspiele_session', payload); } catch(_) {}
@@ -2269,14 +2285,19 @@ function loadLocal() {
 function applyParsed(parsed) {
   if (!parsed) return false;
   const version = parsed._v || 1;
-  if (version === 1 && Array.isArray(parsed.lists)) {
+  if (parsed._savedAt) _lastLocalMutationTs = Math.max(_lastLocalMutationTs || 0, parsed._savedAt || 0);
+  if (Array.isArray(parsed.lists)) {
     parsed.lists = parsed.lists.map(l => {
-      if (l.tournament && !l.tournaments) return { ...l, tournaments: [l.tournament], tournament: undefined };
-      if (!l.tournaments) return { ...l, tournaments: [] };
-      return l;
+      const next = { ...l };
+      if (next.tournament && !next.tournaments) next.tournaments = [next.tournament];
+      if (!Array.isArray(next.tournaments)) next.tournaments = [];
+      if (!Array.isArray(next.history)) next.history = [];
+      if (!Array.isArray(next.persons)) next.persons = [];
+      delete next.tournament;
+      return next;
     });
   }
-  const { _v, _build, pendingResult, currentListId, currentHistoryId, activeTournamentId, currentTab, ...safe } = parsed;
+  const { _v, _build, _savedAt, pendingResult, currentListId, currentHistoryId, activeTournamentId, currentTab, ...safe } = parsed;
   state = { ...state, ...safe };
   return true;
 }
@@ -2315,6 +2336,7 @@ async function saveToSupabase() {
       data: { _v: STATE_VERSION, ...state },
       updated_at: new Date().toISOString()
     }, token);
+    _lastCloudWriteTs = Date.now();
     dbg('DB Save: OK ✅', 'ok');
     setSyncStatus('saved');
   } catch(e) {
@@ -2353,7 +2375,7 @@ async function loadFromSupabase(userId, opts = {}) {
     dbg('DB: ' + bytes + ' bytes geladen ✅', 'ok');
     const ok = applyParsed(row.data);
     if (ok && !SHARED_ENABLED) { stripSharedState(); saveLocal(false); }
-    if (ok) _lastDbLoadTs = Date.now();
+    if (ok) { _lastDbLoadTs = Date.now(); _lastCloudWriteTs = Math.max(_lastCloudWriteTs || 0, dbTs || Date.now()); }
     return ok;
   } catch(e) {
     dbg('DB Load Fehler: ' + e.message, 'err');
@@ -4136,7 +4158,7 @@ function renderLists() {
 function createList() {
   const name = document.getElementById('new-list-name').value.trim();
   if (!name) return;
-  const list = { id: uid(), name, createdAt: Date.now(), persons: [], history: [], tournament: null };
+  const list = { id: uid(), name, createdAt: Date.now(), persons: [], history: [], tournaments: [] };
   state.lists.push(list);
   save(); renderLists(); closeModal('modal-add-list');
   document.getElementById('new-list-name').value = '';
@@ -4202,7 +4224,7 @@ function switchTab(tab) {
   ['persons','actions','history','tournament'].forEach(t => {
     document.getElementById('tab-'+t).classList.toggle('active', t===tab);
     const el = document.getElementById('tab-content-'+t);
-    if (el) el.style.display = t===tab ? 'block' : 'none';
+    if (el) el.style.display = t===tab ? (t==='tournament' ? 'flex' : 'block') : 'none';
   });
   if (tab==='persons') renderPersons();
   if (tab==='actions') renderActiveBanner();
@@ -4529,9 +4551,10 @@ function saveCurrentResult() {
   if (!list.history) list.history = [];
   list.history.unshift({ id: uid(), type: r.type, title: r.title, createdAt: Date.now(), data: r.data });
   save();
+  renderHistory();
   toast('✅ Gespeichert – im Verlauf mit einem Tipp wiederholbar');
   goBack('screen-list-detail');
-  switchTab('actions'); // go back to actions so Quick-Repeat is immediately visible
+  switchTab('history');
 }
 
 // ===================== HISTORY =====================
@@ -4773,7 +4796,7 @@ function renderTournamentList() {
   );
   container.innerHTML = sorted.map(t => {
     const modeLabel = t.mode==='league' ? (t.returnRound ? '⚽ Liga H+R' : '⚽ Liga') : '⚡ K.O.';
-    const played = t.matches.filter(m=>m.scoreA!==null).length;
+    const played = t.matches.filter(m=>m.scoreA!==null&&m.scoreB!==null).length;
     const total = t.matches.length;
     return `<div class="list-nav-item" onclick="openTournament('${t.id}')" style="padding:14px 0;border-bottom:1px solid var(--border)">
       <div class="lni-icon" style="background:linear-gradient(135deg,var(--accent4),#d97706)">${t.mode==='league'?'⚽':'⚡'}</div>
